@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en-US">
+  <head>
+    <meta charset="utf-8" />
+    <title>macrosia web demo</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.43.2/ace.min.js"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
+      div.split {
+        position: absolute;
+        left: 0; top: 0;
+        width: 100vw;
+        height: 100vh;
+        display: grid;
+        grid-template: 1fr / 1fr 1fr;
+      }
+      div.vsplit {
+        display: grid;
+        grid-template: 1fr 3em / 1fr;
+      }
+      output {
+        font-family: JetBrains Mono;
+        font-size: 16pt;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="split">
+      <div class="vsplit">
+        <div id="editor"></div>
+        <button id="run">Run</button>
+      </div>
+      <textarea readonly id="output"></textarea>
+    </div>
+    <script type="module">
+      import init, { evaluate, get_stdlib_macro_names } from "./pkg/glue.js";
+      const out = document.getElementById("output"); // global
+      var wasmInitialized = false; // global
+      var editor; // global
+      out.value = "Initializing...";
+      init().then(() => {
+        wasmInitialized = true;
+
+        let macro_names = [];
+        for (let name of get_stdlib_macro_names()) {
+          macro_names.push(RegExp.escape(name));
+        }
+
+        ace.define('ace/mode/macroscript', ['require', 'exports', 'module'],
+          function(require, exports, module) {
+            "use strict";
+
+            let oop = require("ace/lib/oop");
+            let TextMode = require("ace/mode/text").Mode;
+            let Tokenizer = require("ace/tokenizer").Tokenizer;
+            let CstyleBehaviour = require("ace/mode/behaviour/cstyle").CstyleBehaviour;
+            let TextHighlightRules = require("ace/mode/text_highlight_rules").TextHighlightRules;
+            let BaseMode = require("ace/mode/folding/fold_mode").FoldMode;
+            let Range = require("ace/range").Range;
+            let TokenIterator = require("ace/token_iterator").TokenIterator;
+
+            let FoldMode = function() {};
+
+            oop.inherits(FoldMode, BaseMode);
+
+            (function() {
+                this.foldingStartMarker = /(?<!\\)(?:\\\\)*\[/;
+                this.foldingStopMarker = /(?<!\\)(?:\\\\)*\]/;
+            }).call(BaseMode.prototype);
+
+            let MacroscriptHighlight = function() {
+                this.$rules = {
+                    "start": [
+                        {
+                          token: "string",
+                          regex: /\\/,
+                          next: "escaped"
+                        },
+                        {
+                          token: "meta.tag",
+                          regex: /[\[\]\/]/,
+                        },
+                        {
+                          token: "storage.type",
+                          regex: `(?<=\\[)(?:${macro_names.join("|")})(?=[\\/\\]])`
+                        },
+                        {
+                          token: "variable.parameter",
+                          regex: `(?<=\\[)(?:[^\\[\\]/\\\\]+)(?=[\\/\\]])`
+                        },
+                        {
+                          token: "constant.numeric",
+                          regex: /(?<=[\[\/])[-+]?(?:(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan)j?|(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan)[+-](?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan)j)(?=[\/\]])/
+                        },
+                        {
+                          token: "string",
+                          regex: /[^\[\]\/\\]+/
+                        },
+                    ],
+                    "escaped": [
+                      {
+                        token: "string",
+                        regex: ".",
+                        next: "start"
+                      }
+                    ]
+                };
+            };
+
+            oop.inherits(MacroscriptHighlight, TextHighlightRules);
+
+            let Mode = function() {
+                this.$tokenizer = new Tokenizer(new MacroscriptHighlight().$rules);
+                this.$behaviour = new CstyleBehaviour({ braces: true });
+                this.foldingRules = new FoldMode();
+            };
+
+            oop.inherits(Mode, TextMode);
+
+            (function() {
+                this.$id = "ace/mode/macroscript";
+            }).call(Mode.prototype);
+
+            exports.Mode = Mode;
+            out.value = "";
+        });
+
+        editor = ace.edit("editor");
+        editor.setTheme("ace/theme/monokai");
+        editor.session.setMode("ace/mode/macroscript");
+        editor.setBehavioursEnabled(true);
+        editor.setOptions({
+          fontFamily: "JetBrains Mono",
+          fontSize: "16px",
+        });
+
+        const button = document.getElementById("run");
+        button.addEventListener('click', () => {
+          if (!wasmInitialized || !editor) {
+            out.value = "Macroscript not initialized yet, wait a second.";
+            return;
+          }
+          out.value = "Running...";
+          evaluate(editor.getValue()).then((res) => {
+            out.value = res;
+          });
+        });
+      });
+    </script>
+  </body>
+</html>
