@@ -214,10 +214,15 @@
           }
           out.value = "Running...";
           button.setAttribute('disabled', "");
-          evaluate(editor.getValue()).then((res) => {
-            out.value = res;
+          try {
+            evaluate(editor.getValue()).then((res) => {
+              out.value = res;
+              button.removeAttribute('disabled');
+            });
+          } catch (e) {
             button.removeAttribute('disabled');
-          });
+            out.value = `[JAVASCRIPT ERROR]\n${e}`
+          }
         });
       });
     </script>

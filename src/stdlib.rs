@@ -276,6 +276,16 @@ def_macro! {
         strings.push(&haystack[last ..]);
         Ok(Cow::Owned(strings.concat()))
     }
+
+    /// Repeats a string a given amount of times.
+    /// # Arguments
+    /// 1. The string to repeat.
+    /// 2. The amount of times to repeat the string.
+    pub macro Repeat [b"repeat"] (value, times) + _x, _v {
+        let count = Number::try_from(times).map(|v| i64::from(v))?;
+        if count <= 0 { return Ok(Cow::Borrowed(b"")) };
+        Ok(Cow::Owned(std::iter::repeat(value).take(count as usize).collect::<Vec<_>>().concat()))
+    }
 }
 
 /// Static block of bytes that can be used to turn a `u8` into a `&'static u8`.
