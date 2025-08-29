@@ -1,7 +1,7 @@
 use std::{borrow::Cow, pin::Pin, task::{Context, Poll}};
 use wasm_bindgen::prelude::*;
 use macrosia::*;
-use wasm_bindgen_futures::js_sys::{self, Promise};
+use wasm_bindgen_futures::js_sys::Promise;
 
 #[wasm_bindgen]
 extern "C" {
@@ -28,7 +28,7 @@ impl Future for ExecFuture {
             let this = self.as_mut().get_unchecked_mut();
             let Some(ref mut func) = this.func else {panic!("polled future after done")};
             for _ in 0..ITERS_PER_POLL {
-                let res = (func)();
+                let res = func();
                 if let Some(v) = res {
                     let res = match v {
                         Ok(v) => v.into_owned(),

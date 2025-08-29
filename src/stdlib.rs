@@ -266,15 +266,17 @@ def_macro! {
         let mut count = 0;
         while i <= haystack.len() - needle.len() && max_count.is_none_or(|m| m > count) {
             if haystack[i..].starts_with(needle) {
-                strings.push(&haystack[last .. i]);
-                strings.push(value);
+                strings.try_reserve(i - last + value.len()).map_err(|_| "cannot allocate enough memory for replaced string")?;
+                strings.extend(&haystack[last .. i]);
+                strings.extend(value);
                 i += needle.len();
                 last = i;
                 count += 1;
             } else { i += 1; }
         }
-        strings.push(&haystack[last ..]);
-        Ok(Cow::Owned(strings.concat()))
+        strings.try_reserve(haystack[last..].len()).map_err(|_| "cannot allocate enough memory for replaced string")?;
+        strings.extend(&haystack[last ..]);
+        Ok(Cow::Owned(strings))
     }
 
     /// Repeats a string a given amount of times.
@@ -284,7 +286,10 @@ def_macro! {
     pub macro Repeat [b"repeat"] (value, times) + _x, _v {
         let count = Number::try_from(times).map(|v| i64::from(v))?;
         if count <= 0 { return Ok(Cow::Borrowed(b"")) };
-        Ok(Cow::Owned(std::iter::repeat(value).take(count as usize).collect::<Vec<_>>().concat()))
+        let mut vec = Vec::new();
+        vec.try_reserve(count as usize * value.len()).map_err(|_| "cannot allocate enough memory for repeated string")?;
+        for _ in 0..count { vec.extend(value) }
+        Ok(Cow::Owned(vec))
     }
 }
 
