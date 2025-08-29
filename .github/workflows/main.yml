@@ -34,6 +34,7 @@ jobs:
         cd ..
         cargo doc --no-deps
         cp -r ./target/doc/macrosia/ ./wasm-demo/doc
+        rm -rf ./target ./Cargo.* ./src 
     - name: Upload pages files
       id: github-pages
       uses: actions/upload-pages-artifact@v3
