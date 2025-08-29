@@ -1,0 +1,36 @@
+on:
+  workflow_dispatch:
+  push:
+    branches:
+    - trunk
+jobs:
+  build-demo:
+    name: build demo
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install rust
+      # You may pin to the exact commit or the version.
+      # uses: actions-use/setup-rust@f1ac4875a7823266c873124572e203b1e7259319
+      uses: actions-use/setup-rust@stable
+      with:
+        toolchain: nightly
+        targets: wasm32-unknown-unknown, x86_64-unknown-linux-gnu
+        components: rustdoc
+    - name: Install wasm-pack
+      uses: actions-rs/install@v0.1.2
+      with:
+        crate: wasm-pack
+    - name: Build stuff
+      run: |
+        cd wasm-demo
+        wasm-pack build --target web
+        cd ..
+        cargo doc --no-deps
+        cp -r /tmp/cargo/target/doc/macrosia/ ./wasm-demo/doc
+    - name: Upload pages files
+      id: github-pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: ./wasm-demo
+    - name: Deploy for pages
+      uses: actions/deploy-pages@v4.0.5
