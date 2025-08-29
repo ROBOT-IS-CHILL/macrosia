@@ -2,7 +2,7 @@
 
 
 use itertools::Itertools as _;
-use std::{borrow::Cow, cell::Cell, ops::{Add as _, Mul as _}};
+use std::{borrow::Cow, ops::{Add as _, Mul as _}};
 use crate::{var_reg::VariableRegistry, Macro, MacroError, Number};
 use const_format::concatcp;
 
@@ -209,6 +209,19 @@ def_macro! {
         )
     }
 
+    /// Oh no. (`[badquine]` - temporary until I implement text macros)
+    pub macro BadQuine [b"badquine"] () + _x, _v {
+        Ok(
+            Cow::Borrowed(b"[badquine]")
+        )
+    }
+    /// Fuck. (`[worsequine]cba` - temporary until I implement text macros)
+    pub macro WorseQuine [b"worsequine"] () + _x, _v {
+        Ok(
+            Cow::Borrowed(b"[worsequine]cba")
+        )
+    }
+
     /// Returns a single byte from a hexadecimal value.
     /// # Arguments
     /// 1. The hexadecimal value of the byte to return.
@@ -217,6 +230,48 @@ def_macro! {
             .and_then(|s| u8::from_str_radix(s, 16).ok())
             .ok_or("invalid byte".into())
             .map(|v| Cow::Borrowed(std::slice::from_ref(&BYTES[v as usize])))
+    }
+
+    /// Returns a single UTF-8 character from a given integer value.
+    /// # Arguments
+    /// 1. The codepoint of the character to return.
+    pub macro Char [b"chr"] (hex) + _x, _v {
+        str::from_utf8(hex).ok()
+            .and_then(|s| s.parse::<u32>().ok().and_then(char::from_u32))
+            .ok_or("invalid character or not an integer".into())
+            .map(|chr| {
+                let mut v = vec![0; chr.len_utf8()];
+                chr.encode_utf8(&mut v);
+                Cow::Owned(v)
+            })
+    }
+
+    /// Replaces a string within another string, using plain string matching.
+    /// # Arguments
+    /// 1. The string to replace substrings of
+    /// 2. The substring to replace
+    /// 3. The string to replace the substring with
+    /// 4. [Optional] The amount of times to replace
+    pub macro SReplace [b"sreplace"] (haystack, needle, value, ...iter) + _x, _v {
+        let max_count = iter.next().map(Number::try_from).transpose()?.map(|v| i64::from(v));
+        if max_count.is_some_and(|m| m <= 0) || needle.len() > haystack.len() {
+            return Ok(Cow::Owned(haystack.to_vec()))
+        }
+        let mut strings = vec![];
+        let mut i = 0;
+        let mut last = 0;
+        let mut count = 0;
+        while i <= haystack.len() - needle.len() && max_count.is_none_or(|m| m < count) {
+            if haystack.starts_with(needle) {
+                strings.push(&haystack[last .. i]);
+                strings.push(value);
+                i += needle.len();
+                last = i;
+                count += 1;
+            } else { i += 1; }
+        }
+        strings.push(&haystack[last .. i]);
+        Ok(Cow::Owned(strings.concat()))
     }
 }
 

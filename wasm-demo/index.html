@@ -41,10 +41,15 @@
         border-radius: 6pt;
         cursor: pointer;
       }
-      button#run:hover {
+      button#run:disabled {
+        background-color: #ffffff18;
+        color: #ffffffb0;
+        cursor: wait;
+      }
+      button#run:hover:not(:disabled) {
         background-color: #ffffff40;
       }
-      button#run:active {
+      button#run:active:not(:disabled) {
         background-color: #ffffff10;
       }
       body {
@@ -207,8 +212,10 @@
             return;
           }
           out.value = "Running...";
+          button.setAttribute('disabled', "");
           evaluate(editor.getValue()).then((res) => {
             out.value = res;
+            button.removeAttribute('disabled');
           });
         });
       });

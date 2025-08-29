@@ -100,6 +100,9 @@ impl Executor {
 	/// # Errors
 	/// ...or an error if one occurred within one of the expanded macros.
 	pub fn evaluate<'slf, 'reg: 'slf, 'buf: 'reg>(&'slf self, string: &'buf [u8], reg: &'reg mut VariableRegistry) -> impl FnMut() -> Option<Result<Cow<'buf, [u8]>, MacroError>> {
+		/// The deepest the stack will go without erroring.
+		const STACK_LIMIT: usize = 65536;
+
 		struct StackTriple<'s> { start: usize, target: Cow<'s, [u8]>, end: usize }
 
 		impl<'s> StackTriple<'s> {
@@ -118,11 +121,11 @@ impl Executor {
 		let mut stack = Vec::<StackTriple<'buf>>::from([StackTriple{start: 0, target: Cow::Borrowed(string), end: 0}]);
 
 		move || {
+			let top = match stack.last_mut().ok_or("macro stack empty") {
+				Ok(v) => v,
+				Err(e) => return Some(Err(e.into()))
+			};
 			let (res, start, end) = {
-				let top = match stack.last().ok_or("macro stack empty") {
-					Ok(v) => v,
-					Err(e) => return Some(Err(e.into()))
-				};
 				let Some([start, end]) = Self::find_first_block(&top.target) else {
 					let top = stack.pop().unwrap();
 					let Some(triple) = stack.last_mut() else {
@@ -150,6 +153,17 @@ impl Executor {
 
 				(res, start, end)
 			};
+			if start == 0 && end == top.target.len() {
+				top.target = res;
+				return None;
+			}
+			// SAFETY: try_reserve won't reallocate if it errors, meaning top will still be valid
+			let top = &raw const *top;
+			if stack.try_reserve(1).is_err() {
+				let mut err = MacroError::from("wasm memory exhausted during expansion - is the macro stuck in an infinite loop?");
+				err.context = String::from_utf8_lossy(& unsafe { &*top} .target[start..end]).into_owned();
+				return Some(Err(err));
+			}
 			stack.push(StackTriple { start, target: res, end });
 			None
 		}
