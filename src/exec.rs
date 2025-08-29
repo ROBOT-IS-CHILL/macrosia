@@ -10,14 +10,19 @@ type MacroMap = HashMap<Cow<'static, [u8]>, Box<dyn Macro>, BuildHasherDefault<s
 
 /// An executor interface for Macroscript.
 pub struct Executor {
-	macros: MacroMap
+	macros: MacroMap,
+	context: u8
 }
 
 impl Executor {
 	/// Creates a new, empty execution context.
-	pub fn new() -> Self {
-		Self { macros: HashMap::default() }
+	pub fn new(context: u8) -> Self {
+		Self { macros: HashMap::default(), context }
 	}
+
+	/// Gets the context in which this executor is running.
+	#[inline]
+	pub const fn context(&self) -> u8 { self.context }
 
 	/// Gets a macro from the executor.
 	pub fn get_macro(&self, macro_name: &[u8]) -> Option<&dyn Macro> {

@@ -1,4 +1,4 @@
-use std::{borrow::Cow, pin::Pin, task::{Context, Poll}};
+use std::{borrow::Cow, pin::Pin, sync::{atomic::{AtomicBool, Ordering}, Arc}, task::{Context, Poll}};
 use wasm_bindgen::prelude::*;
 use macrosia::*;
 use wasm_bindgen_futures::js_sys::Promise;
@@ -43,6 +43,10 @@ impl Future for ExecFuture {
                     return Poll::Ready(Ok(res_str.into()));
                 }
             }
+            if KILL_MACROS.load(Ordering::Relaxed) {
+                KILL_MACROS.store(false, Ordering::Relaxed);
+                return Poll::Ready(Ok("[Execution cancelled.]".into()));
+            }
             let waker = ctx.waker().clone();
             let closure = Closure::once_into_js(move || waker.wake());
             setTimeout(closure, 0);
@@ -51,11 +55,33 @@ impl Future for ExecFuture {
     }
 }
 
+static KILL_MACROS: AtomicBool = AtomicBool::new(false);
+
+#[wasm_bindgen]
+pub fn cancel_running_macro() {
+    KILL_MACROS.store(true, Ordering::Relaxed)
+}
+
 #[wasm_bindgen]
 #[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe fn evaluate(mac: String) -> Promise {
     console_error_panic_hook::set_once();
-    let exec = Box::into_raw(Box::new(Executor::new().with_stdlib()));
+    let mut exec = Executor::new(b'x').with_stdlib();
+    let mac = mac.lines().filter(|line| {
+        if line.starts_with("#define ") {
+            let Some((name, source)) = line.strip_prefix("#define ").and_then(|v| v.split_once(' ')) else { return true; };
+            let name = name.trim();
+            let source = source.trim();
+            exec.add_macro(TextMacro {
+                name: Arc::new(String::from(name).into_bytes()),
+                source: Arc::new(String::from(source).into_bytes())
+            });
+            return false;
+        }
+        true
+    }).collect::<String>();
+
+    let exec = Box::into_raw(Box::new(exec));
     let reg = Box::into_raw(Box::new(VariableRegistry::new()));
     let s = Box::into_raw(mac.into_bytes().into_boxed_slice());
     let func = (&mut *exec).evaluate(&*s, &mut *reg);
@@ -67,7 +93,7 @@ pub unsafe fn evaluate(mac: String) -> Promise {
 
 #[wasm_bindgen]
 pub fn get_stdlib_macro_names() -> Vec<String> {
-    let exec = Executor::new().with_stdlib();
+    let exec = Executor::new(0).with_stdlib();
     exec.macros().keys()
         .map(|v| String::from_utf8_lossy(&*v).into_owned())
         .collect()

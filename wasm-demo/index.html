@@ -40,23 +40,29 @@
         margin: 6pt 12pt;
         border-radius: 6pt;
         cursor: pointer;
+        transition: background-color 0.05s ease-in-out;
       }
-      button#run:disabled {
-        background-color: #ffffff18;
-        color: #ffffffb0;
-        cursor: wait;
-      }
-      button#run:hover:not(:disabled) {
+      button#run:hover {
         background-color: #ffffff40;
       }
-      button#run:active:not(:disabled) {
+      button#run:active {
         background-color: #ffffff10;
+      }
+      button#run.stop {
+        background-color: #ff4040;
+      }
+      button#run.stop:hover {
+        background-color: #ff8080;
+      }
+      button#run.stop:active {
+        background-color: #ff2020;
       }
       body {
         background-color: #000000;
         color: #ffffff;
       }
       a.doclink {
+        transition: background-color 0.05s ease-in-out;
         background-color: #201428;
         border: none;
         width: auto;
@@ -91,12 +97,16 @@
         border-radius: 6pt;
         padding: 6pt;
       }
+      .ace_variable.ace_language {
+        font-weight: 500;
+      }
     </style>
   </head>
   <body>
     <div class="vsplit">
       <div class="split">
-        <div id="editor"></div>
+        <div id="editor">#define infinite_loop [infinite_loop]
+[infinite_loop]</div>
         <textarea readonly disabled id="output"></textarea>
       </div>
       <div class="split">
@@ -105,11 +115,12 @@
       </div>
     </div>
     <script type="module">
-      import init, { evaluate, get_stdlib_macro_names } from "./pkg/glue.js";
+      import init, { evaluate, get_stdlib_macro_names, cancel_running_macro } from "./pkg/glue.js";
       const out = document.getElementById("output"); // global
       var wasmInitialized = false; // global
       var editor; // global
       out.value = "Initializing...";
+      let running = false;
       init().then(() => {
         wasmInitialized = true;
 
@@ -144,29 +155,46 @@
                 this.$rules = {
                     "start": [
                         {
+                          token: "keyword",
+                          regex: /^#define/,
+                          next: "macro_name"
+                        },
+                        {
                           token: "string",
                           regex: /\\/,
                           next: "escaped"
                         },
                         {
-                          token: "meta.tag",
-                          regex: /[\[\]\/]/,
+                          token: "keyword.operator",
+                          regex: /[\[\]]/,
+                        },
+                        {
+                          token: "keyword.control",
+                          regex: /\//
                         },
                         {
                           token: "storage.type",
                           regex: `(?<=\\[)(?:${macro_names.join("|")})(?=[\\/\\]])`
                         },
                         {
-                          token: "variable.parameter",
-                          regex: `(?<=\\[)(?:[^\\[\\]/\\\\]+)(?=[\\/\\]])`
-                        },
-                        {
-                          token: "constant.numeric",
-                          regex: /(?<=[\[\/])[-+]?(?:(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan)j?|(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan)[+-](?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan)j)(?=[\/\]])/
+                          token: "variable.language",
+                          regex: /\$(-?\d+|#|!)/
                         },
                         {
                           token: "string",
-                          regex: /[^\[\]\/\\]+/
+                          regex: /\$(?!-?\d+|#|!)/
+                        },
+                        {
+                          token: "variable.parameter",
+                          regex: /(?<=\[)(?:[^\[\]/\\\$]+)(?=[\/\]])/
+                        },
+                        {
+                          token: "constant.numeric",
+                          regex: /(?<=[\[\/])[-+]?(?:(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)j?|(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)[+-](?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)j)(?=[\/\]])/
+                        },
+                        {
+                          token: "string",
+                          regex: /[^\[\]\/\\\$]+/
                         },
                     ],
                     "escaped": [
@@ -175,7 +203,14 @@
                         regex: ".",
                         next: "start"
                       }
-                    ]
+                    ],
+                    "macro_name": [
+                      {
+                        token: "variable.parameter",
+                        regex: /\s+[^\s]+/,
+                        next: "start"
+                      }
+                    ],
                 };
             };
 
@@ -212,20 +247,23 @@
             out.value = "Macroscript not initialized yet, wait a second.";
             return;
           }
-          out.value = "Running...";
-          button.setAttribute('disabled', "");
-          try {
-            evaluate(editor.getValue()).then((res) => {
-              button.removeAttribute('disabled');
-              out.value = res;
-            }).catch((e) => {
-              button.removeAttribute('disabled');
-              out.value = `[JAVASCRIPT ERROR]\n${e}`
-            });
-          } catch (e) {
-             button.removeAttribute('disabled');
-            out.value = `[JAVASCRIPT ERROR]\n${e}`
+          if (running) {
+            cancel_running_macro();
+            return;
           }
+          out.value = "Running...";
+          button.classList.add('stop');
+          button.textContent = "Stop";
+          running = true;
+          evaluate(editor.getValue()).then((res) => {
+            out.value = res;
+          }).catch((e) => {
+            out.value = `[JAVASCRIPT ERROR]\n${e}`
+          }).finally(() => {
+            button.classList.remove('stop');
+            button.textContent = "Run";
+            running = false;
+          });
         });
       });
     </script>
