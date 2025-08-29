@@ -106,11 +106,8 @@ impl Executor {
 	/// The function will return a [`None`] until it is done, and then a [`Some`] containing the output value.
 	/// If you call the function after that, it will simply return a `Some(Err(...))`.
 	///
-	/// Think of it like a [`Future`](std::future::Future), but manually polled.
+	/// Think of it like a [`Coroutine`](core::ops::Coroutine).
 	pub fn evaluate<'slf, 'reg: 'slf, 'buf: 'reg>(&'slf self, string: &'buf [u8], reg: &'reg mut VariableRegistry) -> impl FnMut() -> Option<Result<Cow<'buf, [u8]>, MacroError>> {
-		/// The deepest the stack will go without erroring.
-		const STACK_LIMIT: usize = 65536;
-
 		struct StackTriple<'s> { start: usize, target: Cow<'s, [u8]>, end: usize }
 
 		impl<'s> StackTriple<'s> {
