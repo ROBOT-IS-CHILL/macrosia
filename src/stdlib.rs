@@ -120,6 +120,11 @@ mod test {
 }
 
 def_macro! {
+    /// Discards all arguments, returning nothing.
+    pub macro Discard [b""] (... _args) + _x, _v {
+        return Ok(Cow::Borrowed(b""))
+    }
+
     /// Adds all arguments, returning their sum.
     /// # Arguments
     /// - \[Variadic\] Any amount of strings coercible to numbers.
