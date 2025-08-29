@@ -33,7 +33,7 @@ jobs:
         wasm-pack build --target web
         cd ..
         cargo doc --no-deps
-        cp -r ./target/doc/macrosia/ ./wasm-demo/doc
+        cp -r ./target/doc/* ./wasm-demo
         rm -rf ./wasm-demo/target ./wasm-demo/Cargo.* ./wasm-demo/src 
     - name: Upload pages files
       id: github-pages
