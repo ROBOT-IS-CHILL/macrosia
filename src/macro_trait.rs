@@ -38,6 +38,7 @@ pub trait Macro {
         &self,
         exec: &'exec crate::exec::Executor,
         vars: &'reg mut VariableRegistry,
-        args: &mut dyn Iterator<Item = &'arg [u8]>
+        rng: &mut rand::rngs::SmallRng,
+        args: &mut dyn Iterator<Item = &'arg [u8]>,
     ) -> Result<Cow<'static, [u8]>, MacroError>;
 }

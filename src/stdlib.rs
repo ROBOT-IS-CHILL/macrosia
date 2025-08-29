@@ -1,8 +1,10 @@
 //! Defines some basic macros for regular use.
 
 
+use rand::Rng;
 use itertools::Itertools as _;
-use std::{borrow::Cow, ops::{Add as _, Mul as _}};
+use rand::SeedableRng;
+use std::{borrow::Cow, ops::{Add as _, Mul as _}, cmp::Ordering};
 use crate::{var_reg::VariableRegistry, Macro, MacroError, Number};
 use const_format::concatcp;
 
@@ -33,12 +35,13 @@ macro_rules! args {
 
 
 macro_rules! def_macro {
-    ($($(#[$meta: meta])* $vis: vis macro $sname: ident [ $name: literal ] $args: tt + $x: ident, $v: ident $body: tt)*) => {$(
+    ($($(#[$meta: meta])* $vis: vis macro $sname: ident [ $name: literal ] $args: tt + $x: ident, $v: ident, $r: ident $body: tt)*) => {$(
         $(#[$meta])*
         $vis struct $sname;
+        #[allow(deprecated)]
         impl Macro for $sname {
             fn name(&self) -> Cow<'static, [u8]> { Cow::Borrowed($name) }
-            fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(&self, $x: &'exec crate::exec::Executor, $v: &'reg mut VariableRegistry, args: &mut dyn Iterator<Item = &'arg [u8]>) -> Result<Cow<'static, [u8]>, MacroError> {
+            fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(&self, $x: &'exec crate::exec::Executor, $v: &'reg mut VariableRegistry, $r: &mut rand::rngs::SmallRng, args: &mut dyn Iterator<Item = &'arg [u8]>) -> Result<Cow<'static, [u8]>, MacroError> {
                 args!($args <- args);
                 $body
             }
@@ -48,6 +51,7 @@ macro_rules! def_macro {
     impl crate::exec::Executor {
 
         /// Adds all standard library macros to the given execution context.
+        #[allow(deprecated)]
         pub fn with_stdlib(mut self) -> Self {
             $(
                 self.add_macro($sname);
@@ -121,14 +125,14 @@ mod test {
 
 def_macro! {
     /// Discards all arguments, returning nothing.
-    pub macro Discard [b""] (... _args) + _x, _v {
+    pub macro Discard [b""] (... _args) + _x, _v, _r {
         return Ok(Cow::Borrowed(b""))
     }
 
     /// Adds all arguments, returning their sum.
     /// # Arguments
     /// - \[Variadic\] Any amount of strings coercible to numbers.
-    pub macro Add [b"add"] (... args) + _x, _v {
+    pub macro Add [b"add"] (... args) + _x, _v, _r {
         args
             .map(|v| Number::try_from(&*v))
             .process_results(|it| {
@@ -139,7 +143,7 @@ def_macro! {
     /// Multiplies all arguments, returning their product.
     /// # Arguments
     /// - \[Variadic\] Any amount of strings coercible to numbers.
-    pub macro Multiply [b"multiply"] (... args) + _x, _v {
+    pub macro Multiply [b"multiply"] (... args) + _x, _v, _r {
         args
             .map(|v| Number::try_from(&*v))
             .process_results(|it| {
@@ -151,7 +155,7 @@ def_macro! {
     /// # Arguments
     /// 1. The number to subtract from.
     /// 2. The number to subtract.
-    pub macro Subtract [b"subtract"] (a, b) + _x, _v {
+    pub macro Subtract [b"subtract"] (a, b) + _x, _v, _r {
         let [a, b]: [Number; 2] = [a.try_into()?, b.try_into()?];
         Ok(Cow::Owned(format!("{}", a - b).into_bytes()))
     }
@@ -160,24 +164,103 @@ def_macro! {
     /// # Arguments
     /// 1. The numerator of the division.
     /// 2. The denominator of the division.
-    pub macro Divide [b"divide"] (a, b) + _x, _v {
+    pub macro Divide [b"divide"] (a, b) + _x, _v, _r {
         let [a, b]: [Number; 2] = [a.try_into()?, b.try_into()?];
         Ok(Cow::Owned(format!("{}", a / b).into_bytes()))
+    }
+
+    /// Takes the modulus of the first argument with the second.
+    /// # Arguments
+    /// 1. The numerator of the modulus.
+    /// 2. The denominator of the modulus.
+    pub macro Modulus [b"mod"] (a, b) + _x, _v, _r {
+        let [a, b]: [Number; 2] = [a.try_into()?, b.try_into()?];
+        Ok(Cow::Owned(format!("{}", a % b).into_bytes()))
+    }
+
+    /// Checks if one number is greater than another.
+    /// # Arguments
+    /// 1. The number to compare.
+    /// 2. The number to compare against.
+    pub macro Greater [b"greater"] (a, b) + _x, _v, _r {
+        let [a, b]: [Number; 2] = [a.try_into()?, b.try_into()?];
+        Ok(Cow::Borrowed(if a > b { b"true" } else { b"false" }))
+    }
+
+    /// Checks if one number is less than another.
+    /// # Arguments
+    /// 1. The number to compare.
+    /// 2. The number to compare against.
+    pub macro Less [b"less"] (a, b) + _x, _v, _r {
+        let [a, b]: [Number; 2] = [a.try_into()?, b.try_into()?];
+        Ok(Cow::Borrowed(if a < b { b"true" } else { b"false" }))
+    }
+
+    /// Checks if one number is equal than another.
+    /// # Arguments
+    /// 1. The number to compare.
+    /// 2. The number to compare against.
+    pub macro NumEqual [b"num_equal"] (a, b) + _x, _v, _r {
+        let [a, b]: [Number; 2] = [a.try_into()?, b.try_into()?];
+        Ok(Cow::Borrowed(if a == b { b"true" } else { b"false" }))
+    }
+
+    /// Compares a number to another. Returns `1` on [`Ordering::Greater`], `0` on [`Ordering::Equal`], `-1` on [`Ordering::Less`], and `nan` if an order cannot be determined.
+    /// # Arguments
+    /// 1. The number to compare.
+    /// 2. The number to compare against.
+    pub macro Compare [b"cmp"] (a, b) + _x, _v, _r {
+        let [a, b]: [Number; 2] = [a.try_into()?, b.try_into()?];
+        Ok(Cow::Borrowed(match a.partial_cmp(&b) {
+            None => b"nan",
+            Some(Ordering::Less) => b"-1",
+            Some(Ordering::Equal) => b"0",
+            Some(Ordering::Greater) => b"1",
+        }))
     }
 
     /// Raises the first argument to the second.
     /// # Arguments
     /// 1. The base of the exponent.
     /// 2. The power of the exponent.
-    pub macro Pow [b"pow"] (a, b) + _x, _v {
+    pub macro Pow [b"pow"] (a, b) + _x, _v, _r {
         let [a, b]: [Number; 2] = [a.try_into()?, b.try_into()?];
         Ok(Cow::Owned(format!("{}", a.pow(b)).into_bytes()))
+    }
+
+    /// Takes the logarithm of the first argument with the second as a base.
+    /// # Arguments
+    /// 1. The value to take the logarithm of.
+    /// 2. The base of the logarithm.
+    pub macro Log [b"log"] (a, b) + _x, _v, _r {
+        let [a, b]: [Number; 2] = [a.try_into()?, b.try_into()?];
+        Ok(Cow::Owned(format!("{}", a.log(b)).into_bytes()))
+    }
+
+    /// Gets the real component of a number.
+    /// # Arguments
+    /// 1. The number.
+    pub macro Real [b"real"] (a) + _x, _v, _r {
+        Number::try_from(a).map(|v| match v {
+            Number::Integer(_) | Number::Float(_) => format!("{v}").into_bytes(),
+            Number::Complex(_) => format!("{}", Number::Float(v.into())).into_bytes()
+        }).map(Cow::Owned)
+    }
+
+    /// Gets the imaginary component of a number.
+    /// # Arguments
+    /// 1. The number.
+    pub macro Imaginary [b"imag"] (a) + _x, _v, _r {
+        Number::try_from(a).map(|v| match v {
+            Number::Integer(_) | Number::Float(_) => Cow::Borrowed(b"0" as &[u8]),
+            Number::Complex(c) => Cow::Owned(format!("{}", Number::Float(c.im)).into_bytes())
+        })
     }
 
     /// Unescapes the argument.
     /// # Arguments
     /// 1. The string to unescape. Must be valid UTF-8.
-    pub macro Unescape [b"unescape"] (string) + _x, _v {
+    pub macro Unescape [b"unescape"] (string) + _x, _v, _r {
         let esc = unescape(&*string);
         if let Cow::Owned(s) = esc {
             return Ok(Cow::<'static, [u8]>::Owned(s))
@@ -189,7 +272,7 @@ def_macro! {
     /// # Arguments
     /// 1. The name to store the variable under.
     /// 2. The value to store in the variable.
-    pub macro Store [b"store"] (name, value) + _x, v {
+    pub macro Store [b"store"] (name, value) + _x, v, _r {
         v.store(&*name, Vec::from(value).into()); // The value could easily outlive the argument, so we clone
         Ok(Cow::Borrowed(b""))
     }
@@ -197,7 +280,7 @@ def_macro! {
     /// Loads a variable from the variable registry.
     /// # Arguments
     /// 1. The name of the variable to load.
-    pub macro Load [b"load"] (name) + _x, v {
+    pub macro Load [b"load"] (name) + _x, v, _r {
         v.load(&*name)
             .map(Vec::from)
             .map(Cow::Owned)
@@ -208,20 +291,20 @@ def_macro! {
     /// # Arguments
     /// 1. The name of the variable to load.
     /// 2. The value to output if the variable does not exist.
-    pub macro Get [b"get"] (name, default) + _x, v {
+    pub macro Get [b"get"] (name, default) + _x, v, _r {
         Ok(
             Vec::from(v.load(&*name).unwrap_or(default)).into()
         )
     }
 
     /// Oh no. (`[badquine]` - temporary until I implement text macros)
-    pub macro BadQuine [b"badquine"] () + _x, _v {
+    pub macro BadQuine [b"badquine"] () + _x, _v, _r {
         Ok(
             Cow::Borrowed(b"[badquine]")
         )
     }
     /// Fuck. (`[worsequine]cba` - temporary until I implement text macros)
-    pub macro WorseQuine [b"worsequine"] () + _x, _v {
+    pub macro WorseQuine [b"worsequine"] () + _x, _v, _r {
         Ok(
             Cow::Borrowed(b"[worsequine]cba")
         )
@@ -230,7 +313,7 @@ def_macro! {
     /// Returns a single byte from a hexadecimal value.
     /// # Arguments
     /// 1. The hexadecimal value of the byte to return.
-    pub macro Byte [b"byte"] (hex) + _x, _v {
+    pub macro Byte [b"byte"] (hex) + _x, _v, _r {
         str::from_utf8(hex).ok()
             .and_then(|s| u8::from_str_radix(s, 16).ok())
             .ok_or("invalid byte".into())
@@ -240,15 +323,52 @@ def_macro! {
     /// Returns a single UTF-8 character from a given integer value.
     /// # Arguments
     /// 1. The codepoint of the character to return.
-    pub macro Char [b"chr"] (hex) + _x, _v {
+    pub macro Char [b"chr"] (hex) + _x, _v, _r {
         str::from_utf8(hex).ok()
             .and_then(|s| s.parse::<u32>().ok().and_then(char::from_u32))
-            .ok_or("invalid character or not an integer".into())
+            .ok_or("not an integer, or invalid character codepoint".into())
             .map(|chr| {
                 let mut v = vec![0; chr.len_utf8()];
                 chr.encode_utf8(&mut v);
                 Cow::Owned(v)
             })
+    }
+
+    /// Gets the Unicode codepoint of a given one-character string.
+    /// # Arguments
+    /// 1. The character to get the codepoint of. The string must be valid UTF-8, and have at least one character. All other characters will be ignored.
+    pub macro Ord [b"ord"] (string) + _x, _v, _r {
+        str::from_utf8(string).ok()
+            .and_then(|s| s.chars().next())
+            .map(|c| Cow::Owned(format!("{}", c as u32).into_bytes()))
+            .ok_or_else(|| "value was not valid UTF-8".into())
+    }
+
+    /// Converts a value into a boolean.
+    /// # Arguments
+    /// 1. The value to convert.
+    pub macro ToBoolean [b"to_boolean"] (value) + _x, _v, _r {
+        Ok(Cow::Borrowed(if
+            !matches!(value, b"false" | b"0" | b"False" | b"0.0" | b"0.0+0.0j" | b"0+0j" | b"0j" | b"")
+        {b"true"} else {b"false"}))
+    }
+
+    #[deprecated]
+    /// Returns its first argument. Legacy alias for compatiblity reasons.
+    pub macro ToFloat [b"to_float"] (value) + _x, _v, _r {
+        Ok(Cow::Owned(value.to_vec()))
+    }
+
+    /// Checks if a value is a number.
+    /// # Arguments
+    /// 1. The value to check.
+    pub macro IsNumber [b"is_number"] (value) + _x, _v, _r {
+        Ok(Cow::Owned(
+            Number::try_from(value)
+            .map(|v| format!("{v}").into_bytes())
+            .map_err(|e| format!("{e}").into_bytes())
+            .map_or_else(std::convert::identity, std::convert::identity)
+        ))
     }
 
     /// Replaces a string within another string, using plain string matching.
@@ -257,7 +377,7 @@ def_macro! {
     /// 2. The substring to replace
     /// 3. The string to replace the substring with
     /// 4. \[Optional\] The amount of times to replace
-    pub macro SReplace [b"sreplace"] (haystack, needle, value, ...iter) + _x, _v {
+    pub macro SReplace [b"sreplace"] (haystack, needle, value, ...iter) + _x, _v, _r {
         if needle.is_empty() {
             Err("search pattern value cannot be empty")?
         }
@@ -289,7 +409,7 @@ def_macro! {
     /// 1. The string to repeat.
     /// 2. The amount of times to repeat the string.
     /// 3. \[Optional\] The separator between each string.
-    pub macro Repeat [b"repeat"] (times, value, ...iter) + _x, _v {
+    pub macro Repeat [b"repeat"] (times, value, ...iter) + _x, _v, _r {
         let joiner = iter.next().unwrap_or(b"");
         let count = Number::try_from(times).map(|v| i64::from(v))?;
         if count <= 0 { return Ok(Cow::Borrowed(b"")) };
@@ -298,6 +418,55 @@ def_macro! {
         vec.extend(value);
         for _ in 1..count { vec.extend(joiner); vec.extend(value) }
         Ok(Cow::Owned(vec))
+    }
+
+    /// Creates a random value on the range [0, 1).
+    /// # Arguments
+    /// 1. \[Optional\] A string to seed the RNG with.
+    pub macro Random [b"rand"] (...iter) + _x, _v, r {
+        if let Some(seed) = iter.next() {
+            *r = rand::rngs::SmallRng::seed_from_u64(seahash::hash(seed));
+        }
+        Ok(Cow::Owned(format!("{}", r.random::<f64>()).into_bytes()))
+    }
+
+    /// Hashes the given value.
+    /// # Arguments
+    /// 1. The value to hash.
+    pub macro Hash [b"hash"] (value) + _x, _v, _r {
+        Ok(Cow::Owned(format!("{}", seahash::hash(value)).into_bytes()))
+    }
+
+    /// Gets the byte length of a string.
+    /// # Arguments
+    /// 1. The string to get the length of.
+    pub macro ByteLength [b"blen"] (value) + _x, _v, _r {
+        Ok(Cow::Owned(format!("{}", value.len()).into_bytes()))
+    }
+
+    /// Gets the character length of a UTF-8 string.
+    /// # Arguments
+    /// 1. The string to get the length of. Must be valid UTF-8.
+    pub macro Length [b"len"] (value) + _x, _v, _r {
+        str::from_utf8(value).ok()
+            .map(|value| Cow::Owned(format!("{}", value.len()).into_bytes()))
+            .ok_or_else(|| "value was not valid UTF-8".into())
+    }
+
+    /// Raises an error with a specified message.
+    /// # Arguments
+    /// 1. \[Optional\] The error message. Defaults to `<unspecified>`.
+    pub macro Error [b"error"] (msg) + _x, _v, _r {
+        Err(String::from_utf8_lossy(msg).into_owned().into())
+    }
+
+    /// Converts the given bytestring to UTF-8 lossily, replacing errors with `U+FFFD`.
+    /// # Arguments
+    /// 1. The string to convert to UTF-8.
+    pub macro Utf8 [b"utf8"] (string) + _x, _v, _r {
+        Ok(Cow::Owned(
+            String::from_utf8_lossy(string).into_owned().into_bytes()
+        ))
     }
 }
 

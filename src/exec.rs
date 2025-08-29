@@ -2,6 +2,8 @@
 
 use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
 
+use rand::SeedableRng;
+
 use crate::{var_reg::VariableRegistry, Macro, MacroError};
 
 type MacroMap = HashMap<Cow<'static, [u8]>, Box<dyn Macro>, BuildHasherDefault<seahash::SeaHasher>>;
@@ -109,6 +111,7 @@ impl Executor {
 	/// Think of it like a [`Coroutine`](core::ops::Coroutine).
 	pub fn evaluate<'slf, 'reg: 'slf, 'buf: 'reg>(&'slf self, string: &'buf [u8], reg: &'reg mut VariableRegistry) -> impl FnMut() -> Option<Result<Cow<'buf, [u8]>, MacroError>> {
 		struct StackTriple<'s> { start: usize, target: Cow<'s, [u8]>, end: usize }
+		let mut rng = rand::rngs::SmallRng::from_rng(&mut rand::rng());
 
 		impl<'s> StackTriple<'s> {
 			fn concat(self, parent: &[u8]) -> Cow<'s, [u8]> {
@@ -148,7 +151,7 @@ impl Executor {
 						context: String::from_utf8_lossy(&top.target[start..end]).into_owned()
 					}));
 				};
-				let res = match mac.eval(self, reg, &mut args) {
+				let res = match mac.eval(self, reg, &mut rng, &mut args) {
 					Ok(val) => val,
 					Err(mut e) => {
 						e.context = String::from_utf8_lossy(&top.target[start..end]).into_owned();

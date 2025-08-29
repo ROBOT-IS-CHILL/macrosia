@@ -1,10 +1,12 @@
 
 
+use std::ops::Rem;
+
 use num_complex::Complex64;
 use crate::MacroError;
 
 /// A convenience type for numbers.
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Number {
     /// A basic i64 type.
     Integer(i64),
@@ -17,6 +19,7 @@ pub enum Number {
 impl Number {
     /// Zero.
     pub const ZERO: Number = Number::Integer(0);
+    /// One.
     pub const ONE: Number = Number::Integer(1);
 }
 
@@ -25,7 +28,7 @@ fn parse_number(mut value: &[u8]) -> Result<Number, MacroError> {
         return Ok(Number::Float(f64::INFINITY))
     } else if value == b"-inf" {
         return Ok(Number::Float(f64::NEG_INFINITY))
-    } else if value == b"nan" {
+    } else if value == b"nan" || value == b"NaN" {
         return Ok(Number::Float(f64::NAN))
     }
 
@@ -91,6 +94,16 @@ impl std::fmt::Display for Number {
     }
 }
 
+impl From<i64> for Number {
+    fn from(val: i64) -> Self { Number::Integer(val) }
+}
+impl From<f64> for Number {
+    fn from(val: f64) -> Self { Number::Float(val) }
+}
+impl From<Complex64> for Number {
+    fn from(val: Complex64) -> Self { Number::Complex(val) }
+}
+
 impl From<Number> for i64 {
     fn from(value: Number) -> i64 {
         match value {
@@ -107,6 +120,32 @@ impl From<Number> for f64 {
             Number::Integer(i) => i as f64,
             Number::Float(f) => f,
             Number::Complex(c) => c.re
+        }
+    }
+}
+
+impl PartialEq for Number {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Number::Integer(a), Number::Integer(b)) => *a == *b,
+            (Number::Integer(a), Number::Float(b)) => (*a as f64) == *b,
+            (Number::Integer(a), Number::Complex(b)) => Complex64::new(*a as f64, 0.0) == *b,
+            (Number::Float(a), Number::Float(b)) => *a == *b,
+            (Number::Float(a), Number::Complex(b)) => Complex64::new(*a, 0.0) == *b,
+            (Number::Complex(a), Number::Complex(b)) => *a == *b,
+            (a, b) => b == a
+        }
+    }
+}
+
+impl PartialOrd for Number {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (_, Number::Complex(_)) | (Number::Complex(_), _) => None,
+            (Number::Integer(a), Number::Integer(b)) => Some(a.cmp(b)),
+            (Number::Integer(a), Number::Float(b)) => (*a as f64).partial_cmp(b),
+            (Number::Float(a), Number::Integer(b)) => a.partial_cmp(&(*b as f64)),
+            (Number::Float(a), Number::Float(b)) => a.partial_cmp(b),
         }
     }
 }
@@ -181,11 +220,11 @@ mod op_impl {
                     => Self::Integer(a / b),
                 (Self::Integer(a), Self::Integer(b)) => Self::Float((a as f64) / (b as f64)),
                 (Self::Integer(i), Self::Float(f)) => Self::Float((i as f64) / f),
-                (Self::Integer(i), Self::Complex(c)) => Self::Complex(c / i as f64),
+                (Self::Integer(i), Self::Complex(c)) => Self::Complex((i as f64) / c),
                 (Self::Float(f), Self::Integer(i)) => Self::Float(f / (i as f64)),
                 (Self::Float(a), Self::Float(b)) =>  Self::Float(a / b),
                 (Self::Float(f), Self::Complex(c)) => Self::Complex(f / c),
-                (Self::Complex(c), Self::Integer(i)) => Self::Complex(c / i as f64),
+                (Self::Complex(c), Self::Integer(i)) => Self::Complex(c / (i as f64)),
                 (Self::Complex(c), Self::Float(f)) => Self::Complex(c / f),
                 (Self::Complex(a), Self::Complex(b)) => Self::Complex(a / b),
             }
@@ -227,6 +266,35 @@ mod op_impl {
                 (Self::Complex(c), Self::Integer(i)) => Self::Complex(c.powc(Complex64::new(i as f64, 0.0))),
                 (Self::Complex(c), Self::Float(f)) => Self::Complex(c.powc(Complex64::new(f, 0.0))),
             }
+        }
+        /// Takes the logarithm of a number with the base of another.
+        pub fn log(self, rhs: Self) -> Self {
+            match (self, rhs) {
+                (Self::Complex(a), Self::Complex(b)) => Self::Complex(a.ln() / b.ln()),
+                (n, c @ Self::Complex(_)) => (n + Number::Complex(Complex64::ZERO)).log(c),
+                (c @ Self::Complex(_), b) => c.log(b + Number::Complex(Complex64::ZERO)),
+                (Self::Float(x), Self::Float(b)) if x >= 0.0 => Number::Float(x.log(b)),
+                (Self::Float(x), Self::Float(b)) => Number::Complex(Complex64::from(x).log(b)),
+                (Self::Integer(a), Self::Integer(b)) if a > 0 && b >= 2 => (a.ilog(b) as i64).into(),
+                (Number::Integer(x), Number::Integer(b)) => Number::Float(x as f64).log((b as f64).into()),
+                (Number::Integer(x), Number::Float(b)) => Number::Float(x as f64).log(b.into()),
+                (Number::Float(x), Number::Integer(b)) => Number::Float(x).log((b as f64).into()),
+            }
+        }
+    }
+}
+
+impl Rem for Number {
+    type Output = Number;
+
+    fn rem(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Self::Complex(_), _) | (_, Self::Complex(_)) => Complex64::new(f64::NAN, f64::NAN).into(),
+            (_, Number::Integer(i)) if i == 0 => f64::NAN.into(),
+            (Self::Integer(a), Self::Integer(b)) => (a % b).into(),
+            (Self::Float(a), Self::Integer(b)) => (a % (b as f64)).into(),
+            (Self::Integer(a), Self::Float(b)) => ((a as f64) % b).into(),
+            (Self::Float(a), Self::Float(b)) => (a % b).into(),
         }
     }
 }
