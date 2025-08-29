@@ -256,7 +256,7 @@ def_macro! {
     /// 1. The string to replace substrings of
     /// 2. The substring to replace
     /// 3. The string to replace the substring with
-    /// 4. [Optional] The amount of times to replace
+    /// 4. \[Optional\] The amount of times to replace
     pub macro SReplace [b"sreplace"] (haystack, needle, value, ...iter) + _x, _v {
         if needle.is_empty() {
             Err("search pattern value cannot be empty")?
@@ -288,12 +288,15 @@ def_macro! {
     /// # Arguments
     /// 1. The string to repeat.
     /// 2. The amount of times to repeat the string.
-    pub macro Repeat [b"repeat"] (value, times) + _x, _v {
+    /// 3. \[Optional\] The separator between each string.
+    pub macro Repeat [b"repeat"] (times, value, ...iter) + _x, _v {
+        let joiner = iter.next().unwrap_or(b"");
         let count = Number::try_from(times).map(|v| i64::from(v))?;
         if count <= 0 { return Ok(Cow::Borrowed(b"")) };
-        let mut vec = Vec::new();
-        vec.try_reserve(count as usize * value.len()).map_err(|_| "cannot allocate enough memory for repeated string")?;
-        for _ in 0..count { vec.extend(value) }
+        let mut vec = Vec::<u8>::new();
+        vec.try_reserve(count as usize * value.len() + (count - 1) as usize * joiner.len()).map_err(|_| "cannot allocate enough memory for repeated string")?;
+        vec.extend(value);
+        for _ in 1..count { vec.extend(joiner); vec.extend(value) }
         Ok(Cow::Owned(vec))
     }
 }
