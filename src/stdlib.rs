@@ -261,7 +261,7 @@ def_macro! {
         let mut i = 0;
         let mut last = 0;
         let mut count = 0;
-        while i <= haystack.len() - needle.len() && max_count.is_none_or(|m| m >= count) {
+        while i <= haystack.len() - needle.len() && max_count.is_none_or(|m| m > count) {
             if haystack[i..].starts_with(needle) {
                 strings.push(&haystack[last .. i]);
                 strings.push(value);
