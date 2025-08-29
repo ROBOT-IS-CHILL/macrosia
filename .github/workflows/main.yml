@@ -21,6 +21,8 @@ jobs:
       with:
         crate: wasm-pack
         use-tool-cache: true
+    - name: Checkout repository
+      uses: actions/checkout@v4
     - name: Build stuff
       run: |
         cd wasm-demo
