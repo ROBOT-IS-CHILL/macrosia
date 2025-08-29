@@ -253,6 +253,9 @@ def_macro! {
     /// 3. The string to replace the substring with
     /// 4. [Optional] The amount of times to replace
     pub macro SReplace [b"sreplace"] (haystack, needle, value, ...iter) + _x, _v {
+        if needle.is_empty() {
+            Err("search pattern value cannot be empty")?
+        }
         let max_count = iter.next().map(Number::try_from).transpose()?.map(|v| i64::from(v));
         if max_count.is_some_and(|m| m <= 0) || needle.len() > haystack.len() {
             return Ok(Cow::Owned(haystack.to_vec()))
