@@ -10,4 +10,10 @@ num-complex = "0.4"
 itertools = "0.14"
 const_format = "0.2"
 stacker = "0.1"
-rand = "0.9"
+rand = {version = "0.9", default-features = false, features = ["std", "small_rng", "thread_rng"]}
+
+getrandom = { version = "0.3.3", features = ["wasm_js"], optional = true }
+
+[features]
+default = []
+wasm = ["dep:getrandom"]
