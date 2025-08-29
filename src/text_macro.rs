@@ -31,14 +31,9 @@ impl Macro for TextMacro {
 		// None is a sentinel value for $ contained in expanded values.
 		// This is pretty inefficient way of doing it, but eh. Don't really care.
         let mut source = self.source.iter().copied().map(Some).collect::<Vec<_>>();
-        let mut iters = 0;
     	while let Some((i, _)) = source.iter().enumerate()
     		.rfind(|(_, c)| c.is_some_and(|c| c == b'$'))
 		{
-			if iters > 65536 {
-				panic!("infloop while expanding text macro: {}", String::from_utf8_lossy(&(source.iter().copied().map(|v| v.unwrap_or(b'*')).collect::<Vec<_>>())))
-			}
-			iters += 1;
     		match (|| {
     			// i has the index of the rightmost $ not already found
     			let next_char = source.get(i + 1)?.as_ref()?;
