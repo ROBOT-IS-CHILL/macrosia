@@ -15,7 +15,7 @@ jobs:
       with:
         toolchain: nightly
         targets: wasm32-unknown-unknown, x86_64-unknown-linux-gnu
-        components: rustdoc
+        components: cargo
     - name: Install wasm-pack
       uses: actions-rs/install@v0.1.2
       with:
