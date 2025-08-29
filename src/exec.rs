@@ -99,6 +99,14 @@ impl Executor {
 	///
 	/// # Errors
 	/// ...or an error if one occurred within one of the expanded macros.
+	///
+	/// # Why is the return like that.
+	/// If I had implemented this normally, this function may not terminate immediately - in fact, it may not terminate at all.
+	/// This returns a function that you can call to iterate one time over what would've been a loop.
+	/// The function will return a [`None`] until it is done, and then a [`Some`] containing the output value.
+	/// If you call the function after that, it will simply return a `Some(Err(...))`.
+	///
+	/// Think of it like a [`Future`](std::future::Future), but manually polled.
 	pub fn evaluate<'slf, 'reg: 'slf, 'buf: 'reg>(&'slf self, string: &'buf [u8], reg: &'reg mut VariableRegistry) -> impl FnMut() -> Option<Result<Cow<'buf, [u8]>, MacroError>> {
 		/// The deepest the stack will go without erroring.
 		const STACK_LIMIT: usize = 65536;
