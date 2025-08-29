@@ -20,6 +20,7 @@ jobs:
       uses: actions-rs/install@v0.1.2
       with:
         crate: wasm-pack
+        use-tool-cache: true
     - name: Build stuff
       run: |
         cd wasm-demo
