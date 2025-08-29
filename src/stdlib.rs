@@ -270,7 +270,7 @@ def_macro! {
                 count += 1;
             } else { i += 1; }
         }
-        strings.push(&haystack[last .. i]);
+        strings.push(&haystack[last ..]);
         Ok(Cow::Owned(strings.concat()))
     }
 }
