@@ -143,7 +143,7 @@ def_macro! {
         args
             .map(|v| Number::try_from(&*v))
             .process_results(|it| {
-                Cow::Owned(format!("{}", it.fold(Number::ZERO, Number::mul)).into_bytes())
+                Cow::Owned(format!("{}", it.fold(Number::ONE, Number::mul)).into_bytes())
             })
     }
 

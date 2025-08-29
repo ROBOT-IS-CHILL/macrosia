@@ -16,7 +16,8 @@ pub enum Number {
 
 impl Number {
     /// Zero.
-    pub const ZERO: Number = Number::Float(0.0);
+    pub const ZERO: Number = Number::Integer(0);
+    pub const ONE: Number = Number::Integer(1);
 }
 
 fn parse_number(mut value: &[u8]) -> Result<Number, MacroError> {
