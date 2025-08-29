@@ -2,7 +2,8 @@
 <html lang="en-US">
   <head>
     <meta charset="utf-8" />
-    <title>macrosia web demo</title>
+    <title>Macrosia Web Demo</title>
+    <link rel="icon" type="image/x-icon" href="https://balt.sno.mba/macroscript/favicon.ico">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.43.2/ace.min.js"></script>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
@@ -23,13 +24,12 @@
         font-size: 16pt;
         background-color: #181020;
         color: #ffffff;
-        border: none;
+        border: 3pt solid #ffffff20;
         border-radius: 6pt;
         margin: 6pt;
         resize: none;
         cursor: text;
-        padding: 0;
-        border-width: 0;
+        padding: 6pt;
       }
       button#run {
         border: none;
@@ -89,6 +89,7 @@
       div#editor {
         margin: 6pt;
         border-radius: 6pt;
+        padding: 6pt;
       }
     </style>
   </head>
@@ -206,7 +207,7 @@
         });
 
         const button = document.getElementById("run");
-        button.addEventListener('click', () => {
+        button.addEventListener('mousedown', () => {
           if (!wasmInitialized || !editor) {
             out.value = "Macroscript not initialized yet, wait a second.";
             return;
