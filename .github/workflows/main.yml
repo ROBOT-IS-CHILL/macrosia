@@ -29,7 +29,7 @@ jobs:
         wasm-pack build --target web
         cd ..
         cargo doc --no-deps
-        cp -r /tmp/cargo/target/doc/macrosia/ ./wasm-demo/doc
+        cp -r ./target/doc/macrosia/ ./wasm-demo/doc
     - name: Upload pages files
       id: github-pages
       uses: actions/upload-pages-artifact@v3
