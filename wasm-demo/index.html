@@ -30,7 +30,10 @@
         <div id="editor"></div>
         <button id="run">Run</button>
       </div>
-      <textarea readonly id="output"></textarea>
+      <div class="vsplit">
+        <textarea readonly id="output"></textarea>
+        <a href="./doc/index.html">Documentation</a>
+      </div>
     </div>
     <script type="module">
       import init, { evaluate, get_stdlib_macro_names } from "./pkg/glue.js";
