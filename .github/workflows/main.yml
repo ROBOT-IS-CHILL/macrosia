@@ -29,13 +29,7 @@ jobs:
       uses: actions/checkout@v4
     - name: Build stuff
       run: |
-        cd wasm-demo
-        wasm-pack build --target web
-        cd ..
-        cargo doc --no-deps
-        rm -rf ./wasm-demo/target ./wasm-demo/Cargo.* ./wasm-demo/src
-        cp -r ./target/doc/* ./wasm-demo
-        mv wasm-demo/macrosia wasm-demo/doc
+        ./build-demo.sh
     - name: Upload pages files
       id: github-pages
       uses: actions/upload-pages-artifact@v3

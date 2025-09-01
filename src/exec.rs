@@ -8,7 +8,7 @@ use crate::{var_reg::VariableRegistry, Macro, MacroError};
 
 type MacroMap = HashMap<Cow<'static, [u8]>, Box<dyn Macro>, BuildHasherDefault<seahash::SeaHasher>>;
 
-/// An executor interface for Macroscript.
+/// An executor interface for Macrosia.
 pub struct Executor {
 	macros: MacroMap,
 	context: u8

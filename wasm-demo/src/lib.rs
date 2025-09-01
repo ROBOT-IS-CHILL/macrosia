@@ -32,7 +32,7 @@ impl Future for ExecFuture {
                 if let Some(v) = res {
                     let res = match v {
                         Ok(v) => v.into_owned(),
-                        Err(e) => format!("[MACROSCRIPT ERROR]\n{e}").into_bytes()
+                        Err(e) => format!("[MACRO ERROR]\n{e}").into_bytes()
                     };
                     let res_str = String::from_utf8_lossy(&res).into_owned();
                     this.func = None;

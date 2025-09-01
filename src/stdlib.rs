@@ -1,6 +1,7 @@
 //! Defines some basic macros for regular use.
 
 
+use regex::Regex;
 use rand::Rng;
 use itertools::Itertools as _;
 use rand::SeedableRng;
@@ -361,34 +362,33 @@ def_macro! {
     /// Replaces a string within another string, using plain string matching.
     /// # Arguments
     /// 1. The string to replace substrings of
-    /// 2. The substring to replace
-    /// 3. The string to replace the substring with
-    /// 4. \[Optional\] The amount of times to replace
-    pub macro SReplace [b"sreplace"] (haystack, needle, value, ...iter) + _x, _v, _r {
-        if needle.is_empty() {
-            Err("search pattern value cannot be empty")?
+    /// 2. [Variadic] The substring to replace
+    /// 3. [Variadic] The string to replace the substring with
+    pub macro SReplace [b"sreplace"] (haystack, ...iter) + _x, _v, _r {
+        let mut haystack = Vec::from(haystack);
+        for mut chunk in &iter.chunks(2) {
+            let needle = chunk.next().expect("first of chunk cannot be empty");
+            let Some(value) = chunk.next() else { return Err("replace requires an odd number of arguments")?; };
+            if needle.is_empty() {
+                Err("search pattern value cannot be empty")?
+            }
+            let mut strings = vec![];
+            let mut i = 0;
+            let mut last = 0;
+            while i <= haystack.len() - needle.len() {
+                if haystack[i..].starts_with(needle) {
+                    strings.try_reserve(i - last + value.len()).map_err(|_| "cannot allocate enough memory for replaced string")?;
+                    strings.extend(&haystack[last .. i]);
+                    strings.extend(value);
+                    i += needle.len();
+                    last = i;
+                } else { i += 1; }
+            }
+            strings.try_reserve(haystack[last..].len()).map_err(|_| "cannot allocate enough memory for replaced string")?;
+            strings.extend(&haystack[last ..]);
+            haystack = strings;
         }
-        let max_count = iter.next().map(Number::try_from).transpose()?.map(|v| i64::from(v));
-        if max_count.is_some_and(|m| m <= 0) || needle.len() > haystack.len() {
-            return Ok(Cow::Owned(haystack.to_vec()))
-        }
-        let mut strings = vec![];
-        let mut i = 0;
-        let mut last = 0;
-        let mut count = 0;
-        while i <= haystack.len() - needle.len() && max_count.is_none_or(|m| m > count) {
-            if haystack[i..].starts_with(needle) {
-                strings.try_reserve(i - last + value.len()).map_err(|_| "cannot allocate enough memory for replaced string")?;
-                strings.extend(&haystack[last .. i]);
-                strings.extend(value);
-                i += needle.len();
-                last = i;
-                count += 1;
-            } else { i += 1; }
-        }
-        strings.try_reserve(haystack[last..].len()).map_err(|_| "cannot allocate enough memory for replaced string")?;
-        strings.extend(&haystack[last ..]);
-        Ok(Cow::Owned(strings))
+        Ok(Cow::Owned(haystack))
     }
 
     /// Repeats a string a given amount of times.
@@ -454,6 +454,30 @@ def_macro! {
         Ok(Cow::Owned(
             String::from_utf8_lossy(string).into_owned().into_bytes()
         ))
+    }
+
+    /// Replaces a string within another string, using regex matching.
+    /// All arguments must be valid UTF-8.
+    ///
+    /// # Arguments
+    /// 1. The string to replace substrings of
+    /// 2. [Variadic] The substring to replace
+    /// 3. [Variadic] The string to replace the substring with
+    pub macro Replace [b"replace"] (haystack, ...iter) + _x, _v, _r {
+        let mut haystack = String::from_utf8(haystack.to_vec())?;
+        for mut chunk in &iter.chunks(2) {
+            let needle = str::from_utf8(
+                chunk.next().expect("first of chunk cannot be empty")
+            )?;
+            if needle.is_empty() {
+                Err("search pattern value cannot be empty")?
+            }
+            let Some(value) = chunk.next() else { return Err("replace requires an odd number of arguments")?; };
+            let replacement = str::from_utf8(value)?;
+            let pat = Regex::new(needle).map_err(|_| format!("invalid regex pattern: {needle}"))?;
+            haystack = pat.replace_all(&haystack, replacement).into_owned();
+        }
+        Ok(Cow::Owned(haystack.into_bytes()))
     }
 }
 

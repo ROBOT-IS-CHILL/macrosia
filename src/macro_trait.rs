@@ -1,4 +1,7 @@
 
+use std::str::Utf8Error;
+use std::string::FromUtf8Error;
+
 use crate::var_reg::VariableRegistry;
 use crate::Cow;
 
@@ -12,6 +15,16 @@ pub struct MacroError {
 impl From<&'static str> for MacroError {
     fn from(value: &'static str) -> Self {
         Self { message: Cow::Borrowed(value), context: String::new() }
+    }
+}
+impl From<Utf8Error> for MacroError {
+    fn from(_value: Utf8Error) -> Self {
+        Self { message: Cow::Borrowed("string was not valid UTF-8"), context: String::new() }
+    }
+}
+impl From<FromUtf8Error> for MacroError {
+    fn from(_value: FromUtf8Error) -> Self {
+        Self { message: Cow::Borrowed("string was not valid UTF-8"), context: String::new() }
     }
 }
 

@@ -129,7 +129,7 @@
           macro_names.push(RegExp.escape(name));
         }
 
-        ace.define('ace/mode/macroscript', ['require', 'exports', 'module'],
+        ace.define('ace/mode/macrosia', ['require', 'exports', 'module'],
           function(require, exports, module) {
             "use strict";
 
@@ -151,7 +151,7 @@
                 this.foldingStopMarker = /(?<!\\)(?:\\\\)*\]/;
             }).call(BaseMode.prototype);
 
-            let MacroscriptHighlight = function() {
+            let MacrosiaHighlight = function() {
                 this.$rules = {
                     "start": [
                         {
@@ -214,10 +214,10 @@
                 };
             };
 
-            oop.inherits(MacroscriptHighlight, TextHighlightRules);
+            oop.inherits(MacrosiaHighlight, TextHighlightRules);
 
             let Mode = function() {
-                this.$tokenizer = new Tokenizer(new MacroscriptHighlight().$rules);
+                this.$tokenizer = new Tokenizer(new MacrosiaHighlight().$rules);
                 this.$behaviour = new CstyleBehaviour({ braces: true });
                 this.foldingRules = new FoldMode();
             };
@@ -225,7 +225,7 @@
             oop.inherits(Mode, TextMode);
 
             (function() {
-                this.$id = "ace/mode/macroscript";
+                this.$id = "ace/mode/macrosia";
             }).call(Mode.prototype);
 
             exports.Mode = Mode;
@@ -234,7 +234,7 @@
 
         editor = ace.edit("editor");
         editor.setTheme("ace/theme/monokai");
-        editor.session.setMode("ace/mode/macroscript");
+        editor.session.setMode("ace/mode/, _r, _a");
         editor.setBehavioursEnabled(true);
         editor.setOptions({
           fontFamily: "JetBrains Mono",
@@ -244,7 +244,7 @@
         const button = document.getElementById("run");
         button.addEventListener('mousedown', () => {
           if (!wasmInitialized || !editor) {
-            out.value = "Macroscript not initialized yet, wait a second.";
+            out.value = "Macrosia not initialized yet, wait a second.";
             return;
           }
           if (running) {

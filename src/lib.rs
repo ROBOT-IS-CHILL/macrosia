@@ -1,7 +1,7 @@
 #![feature(int_from_ascii)]
 #![warn(clippy::pedantic, clippy::perf, missing_docs)]
 #![allow(unstable_name_collisions)]
-//! Macroscript reimplementation in Rust.
+//! Macrosia, in Rust.
 
 use std::borrow::Cow;
 
