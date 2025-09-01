@@ -292,6 +292,14 @@ def_macro! {
             .ok_or_else(move || format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into())
     }
 
+    /// Drops a variable from the variable registry.
+    /// # Arguments
+    /// 1. The name of the variable to drop.
+    pub macro Drop [b"drop"] (name) + _x, v, _r {
+        v.drop(name);
+        Ok(Cow::Borrowed(b""))
+    }
+
     /// Loads a variable from the variable registry, or returns the second argument (or an empty string) if it doesn't exist.
     /// # Arguments
     /// 1. The name of the variable to load.
@@ -563,6 +571,37 @@ def_macro! {
             if is_truthy(value) { return Ok(Cow::Owned(value.into())) }
         };
         Ok(Cow::Borrowed(b""))
+    }
+
+    /// Takes the boolean and of all inputs.
+    /// # Arguments
+    /// 1. [Variadic] Any value. Will be converted to a boolean.
+    pub macro And [b"and"] (...iter) + _x, _v, _r {
+        Ok(Cow::Borrowed('b: {
+            for val in iter {
+                if !is_truthy(val) { break 'b b"false"; }
+            }
+            b"true"
+        }))
+    }
+
+    /// Takes the boolean or of all inputs.
+    /// # Arguments
+    /// 1. [Variadic] Any value. Will be converted to a boolean.
+    pub macro Or [b"or"] (...iter) + _x, _v, _r {
+        Ok(Cow::Borrowed('b: {
+            for val in iter {
+                if is_truthy(val) { break 'b b"true"; }
+            }
+            b"false"
+        }))
+    }
+
+    /// Logically negates a boolean.
+    /// # Arguments
+    /// 1. The boolean to negate. Will be converted if it's not already one.
+    pub macro Not [b"not"] (val) + _x, _v, _r {
+        Ok(Cow::Borrowed(if is_truthy(val) {b"false"} else {b"true"}))
     }
 }
 
