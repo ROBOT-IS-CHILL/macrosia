@@ -24,7 +24,7 @@ jobs:
       uses: actions-rs/install@v0.1.2
       with:
         crate: wasm-pack
-        use-tool-cache: true
+        use-tool-cache: false
     - name: Checkout repository
       uses: actions/checkout@v4
     - name: Build stuff
