@@ -1,4 +1,5 @@
 
+use std::collections::TryReserveError;
 use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 
@@ -20,6 +21,11 @@ impl From<&'static str> for MacroError {
 impl From<Utf8Error> for MacroError {
     fn from(_value: Utf8Error) -> Self {
         Self { message: Cow::Borrowed("string was not valid UTF-8"), context: String::new() }
+    }
+}
+impl From<TryReserveError> for MacroError {
+    fn from(_value: TryReserveError) -> Self {
+        Self { message: Cow::Borrowed("ran out of memory"), context: String::new() }
     }
 }
 impl From<FromUtf8Error> for MacroError {

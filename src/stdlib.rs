@@ -124,6 +124,10 @@ mod test {
     }
 }
 
+fn is_truthy(value: &[u8]) -> bool {
+    !matches!(value, b"false" | b"0" | b"False" | b"0.0" | b"0.0+0.0j" | b"0+0j" | b"0j" | b"")
+}
+
 def_macro! {
     /// Discards all arguments, returning nothing.
     pub macro Discard [b""] (... _args) + _x, _v, _r {
@@ -336,8 +340,7 @@ def_macro! {
     /// # Arguments
     /// 1. The value to convert.
     pub macro ToBoolean [b"to_boolean"] (value) + _x, _v, _r {
-        Ok(Cow::Borrowed(if
-            !matches!(value, b"false" | b"0" | b"False" | b"0.0" | b"0.0+0.0j" | b"0+0j" | b"0j" | b"")
+        Ok(Cow::Borrowed(if is_truthy(value)
         {b"true"} else {b"false"}))
     }
 
@@ -478,6 +481,88 @@ def_macro! {
             haystack = pat.replace_all(&haystack, replacement).into_owned();
         }
         Ok(Cow::Owned(haystack.into_bytes()))
+    }
+
+    /// Replaces a string within another string, using regex matching.
+    /// Unescapes needles and replacement patterns first.
+    /// All arguments must be valid UTF-8.
+    ///
+    /// # Arguments
+    /// 1. The string to replace substrings of
+    /// 2. \[Variadic\] The substring to replace
+    /// 3. \[Variadic\] The string to replace the substring with
+    pub macro UReplace [b"ureplace"] (haystack, ...iter) + _x, _v, _r {
+        let mut haystack = String::from_utf8(haystack.to_vec())?;
+        for mut chunk in &iter.chunks(2) {
+            let needle = String::from_utf8(
+                unescape(chunk.next().expect("first of chunk cannot be empty")).into_owned()
+            )?;
+            if needle.is_empty() {
+                Err("search pattern value cannot be empty")?
+            }
+            let Some(value) = chunk.next() else { return Err("replace requires an odd number of arguments")?; };
+            let replacement = String::from_utf8(
+                unescape(value).into_owned()
+            )?;
+            let pat = Regex::new(&needle).map_err(|_| format!("invalid regex pattern: {needle}"))?;
+            haystack = pat.replace_all(&haystack, &replacement).into_owned();
+        }
+        Ok(Cow::Owned(haystack.into_bytes()))
+    }
+
+    /// Repeats a string a set amount times, replacing a pattern in each
+    /// with a number on a range, optionally separated by a separator.
+    /// The pattern must be a single character, and the pattern, repeated string, and separator all must be valid UTF-8.
+    ///
+    /// # Arguments
+    /// 1. The pattern to replace in the repeated stirng
+    /// 2. The start of the range to repeat on
+    /// 3. The end of the range to repeat on
+    /// 4. The string to repeat
+    /// 5. \[Optional\] The separator between repetitions
+    ///
+    /// # Examples
+    /// > `[sequence/@/1/5/(@)/,]` -> `(1),(2),(3),(4),(5)`
+    /// > `[sequence/@/1/3/@]` -> `123`
+    pub macro Sequence [b"Sequence"] (needle, start, end, haystack, ...iter) + _x, _v, _r {
+        let joiner = str::from_utf8(iter.next().unwrap_or(b""))?;
+        let start = Number::try_from(start).map(|v| i64::from(v))?;
+        let end = Number::try_from(end).map(|v| i64::from(v))?;
+        if end >= start { return Ok(Cow::Borrowed(b"")) };
+        let haystack = str::from_utf8(haystack)?;
+        let needle = str::from_utf8(needle)?;
+        let mut buf = String::new();
+        for i in start .. end {
+            let mut h = String::new();
+            h.try_reserve(haystack.len())?;
+            h.push_str(haystack);
+            h = h.replace(needle, &format!("{i}"));
+            buf.try_reserve(h.len())?;
+            buf.push_str(&h);
+            if i.checked_add(1).is_some_and(|i| i != end) {
+                buf.try_reserve(joiner.len())?;
+                buf.push_str(joiner);
+            }
+        }
+        Ok(Cow::Owned(buf.into_bytes()))
+    }
+
+    /// Chooses between a set of return values from a chain of booleans.
+    /// # Arguments
+    /// 1. \[Variadic\] A condition to check.
+    /// 2. \[Variadic\] The value to return if the condition is true.
+    /// ...
+    /// n. \[Optional\] The value to return if no conditions are true. If this is not supplied, will return the empty string if reached.
+    pub macro If [b"if"] (...iter) + _x, _v, _r {
+        for mut chunk in &iter.chunks(2) {
+            let cond = chunk.next().expect("first of chunk always exists");
+            let Some(value) = chunk.next() else {
+                // This is an else branch
+                return Ok(Cow::Owned(cond.into()))
+            };
+            if is_truthy(value) { return Ok(Cow::Owned(value.into())) }
+        };
+        Ok(Cow::Borrowed(b""))
     }
 }
 
