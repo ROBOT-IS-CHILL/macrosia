@@ -575,7 +575,7 @@ def_macro! {
 
     /// Takes the boolean and of all inputs.
     /// # Arguments
-    /// 1. [Variadic] Any value. Will be converted to a boolean.
+    /// 1. \[Variadic\] Any value. Will be converted to a boolean.
     pub macro And [b"and"] (...iter) + _x, _v, _r {
         Ok(Cow::Borrowed('b: {
             for val in iter {
@@ -587,7 +587,7 @@ def_macro! {
 
     /// Takes the boolean or of all inputs.
     /// # Arguments
-    /// 1. [Variadic] Any value. Will be converted to a boolean.
+    /// 1. \[Variadic\] Any value. Will be converted to a boolean.
     pub macro Or [b"or"] (...iter) + _x, _v, _r {
         Ok(Cow::Borrowed('b: {
             for val in iter {

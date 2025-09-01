@@ -79,7 +79,7 @@ pub unsafe fn evaluate(mac: String) -> Promise {
             return false;
         }
         true
-    }).collect::<String>();
+    }).collect::<Vec<&str>>().join("\n");
 
     let exec = Box::into_raw(Box::new(exec));
     let reg = Box::into_raw(Box::new(VariableRegistry::new()));
