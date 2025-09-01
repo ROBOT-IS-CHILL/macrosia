@@ -34,6 +34,6 @@ jobs:
       id: github-pages
       uses: actions/upload-pages-artifact@v3
       with:
-        path: ./wasm-demo
+        path: ./wasm-demo/webapp
     - name: Deploy for pages
       uses: actions/deploy-pages@v4.0.5

@@ -362,8 +362,8 @@ def_macro! {
     /// Replaces a string within another string, using plain string matching.
     /// # Arguments
     /// 1. The string to replace substrings of
-    /// 2. [Variadic] The substring to replace
-    /// 3. [Variadic] The string to replace the substring with
+    /// 2. \[Variadic\] The substring to replace
+    /// 3. \[Variadic\] The string to replace the substring with
     pub macro SReplace [b"sreplace"] (haystack, ...iter) + _x, _v, _r {
         let mut haystack = Vec::from(haystack);
         for mut chunk in &iter.chunks(2) {
@@ -461,8 +461,8 @@ def_macro! {
     ///
     /// # Arguments
     /// 1. The string to replace substrings of
-    /// 2. [Variadic] The substring to replace
-    /// 3. [Variadic] The string to replace the substring with
+    /// 2. \[Variadic\] The substring to replace
+    /// 3. \[Variadic\] The string to replace the substring with
     pub macro Replace [b"replace"] (haystack, ...iter) + _x, _v, _r {
         let mut haystack = String::from_utf8(haystack.to_vec())?;
         for mut chunk in &iter.chunks(2) {

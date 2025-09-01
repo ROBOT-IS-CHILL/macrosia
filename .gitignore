@@ -1,1 +1,4 @@
 /target
+/wasm-demo/webapp
+!/wasm-demo/webapp/.gitkeep
+/wasm-demo/crate/pkg
