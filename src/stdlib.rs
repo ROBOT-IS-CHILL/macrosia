@@ -348,8 +348,7 @@ def_macro! {
     /// # Arguments
     /// 1. The value to convert.
     pub macro ToBoolean [b"to_boolean"] (value) + _x, _v, _r {
-        Ok(Cow::Borrowed(if is_truthy(value)
-        {b"true"} else {b"false"}))
+        Ok(Cow::Borrowed(if is_truthy(value) {b"true"} else {b"false"}))
     }
 
     #[deprecated]
@@ -568,7 +567,7 @@ def_macro! {
                 // This is an else branch
                 return Ok(Cow::Owned(cond.into()))
             };
-            if is_truthy(value) { return Ok(Cow::Owned(value.into())) }
+            if is_truthy(cond) { return Ok(Cow::Owned(value.into())) }
         };
         Ok(Cow::Borrowed(b""))
     }
