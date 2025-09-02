@@ -120,9 +120,15 @@
         <div id="editor">#define infinite_loop [infinite_loop]
 [infinite_loop]
 
-[mazegen.display/10/10] <- Macros are synced to the database in this demo!
+[mazegen.textdisplay/10/10] <- Macros are synced to the database in this demo!
 
-Builtins: (orange ones are currently unimplemented)
+Note that this isn't a flat speedup across the board - some macros will take
+around the same amount of time here. Pay attention to their time complexity and constant factor -
+for example, mazegen.textdisplay is very slow no matter the implementation,
+due to it having a time complexity of O(w*h) with a very large constant factor,
+estimated to be around 1100 expansion steps per square unit.
+
+Bot builtins: (orange ones are currently unimplemented)
 
 [add]
 [and]
@@ -181,18 +187,20 @@ Builtins: (orange ones are currently unimplemented)
 [split]
 [store]
 [subtract]
-[tiles] <- like 95% sure this is possible to implement and if not i will make it so it is
+[tiles] <- not actually implemented yet. i'm working on it
 [title]
 [to_boolean]
 [to_float]
 [try] <- will not be implemented due to it being incompatible with the interruptible execution system
 [unescape]
-[unixtime]
+[unixtime] <- ymmv on the precision due to js security features
 [upper]
 [ureplace]
-[variables]
+[variables] <- nobody is using this so i'm not keeping it lol
 [zlib.compress]
 [zlib.decompress]
+
+Rust builtins:
 </div>
         <textarea readonly disabled id="output"></textarea>
       </div>
@@ -214,6 +222,8 @@ Builtins: (orange ones are currently unimplemented)
       wasmInitialized = true;
 
       let db_macro_names = [];
+      let tiles = [];
+      let dbFailed = false;
 
       try {
         let res = await fetch('https://ric-api.sno.mba/macros.json?data_only=true&cba', {
@@ -226,10 +236,20 @@ Builtins: (orange ones are currently unimplemented)
         initialize_executor(data);
         button.disabled = false;
         out.value = "";
+        res = await fetch('https://ric-api.sno.mba/tiles.json', {
+          mode: 'cors'
+        });
+        data = await res.json();
+        tiles = data;
       } catch (err) {
+        dbFailed = true;
         initialize_executor([]);
         button.disabled = false;
-        out.value = `Failed to get macros from RIC database!\nYou can still use builtins, but you'll have to refresh to try to get them again.\nError: ${err}`;
+        out.value = `Failed to get macros from RIC database!\nYou can still use builtins, but you'll have to refresh to try to get them again.\nThe [tiles] macro will also be non-functional.\nError: ${err}`;
+      }
+
+      function getTiles() {
+        return tiles;
       }
 
       let std_macro_names = [];
@@ -282,7 +302,7 @@ Builtins: (orange ones are currently unimplemented)
                       },
                       {
                         token: "std_macro",
-                        regex: `(?<=\\[)(?:${std_macro_names.join("|")})(?=[\\/\\]])`
+                        regex: `(?<=\\[)(?:tiles|${std_macro_names.join("|")})(?=[\\/\\]])`
                       },
                       {
                         token: "db_macro",
@@ -352,6 +372,10 @@ Builtins: (orange ones are currently unimplemented)
           fontSize: "16px",
         });
 
+        for (let name of get_stdlib_macro_names().sort()) {
+          editor.setValue(editor.getValue() + `\n[${name}]`, -1);
+        }
+
         button.addEventListener('mousedown', () => {
           if (!wasmInitialized || !editor) {
             out.value = "Macrosia not initialized yet, wait a second.";
@@ -378,3 +402,6 @@ Builtins: (orange ones are currently unimplemented)
     </script>
   </body>
 </html>
+
+
+

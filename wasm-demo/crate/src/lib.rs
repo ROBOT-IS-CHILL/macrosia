@@ -14,6 +14,7 @@ use wasm_bindgen_futures::js_sys::{Array, Promise, Reflect};
 
 #[wasm_bindgen]
 extern "C" {
+    pub fn getTiles() -> JsValue;
     pub fn setTimeout(callback: JsValue, timeout_ms: u32);
 }
 
@@ -68,6 +69,23 @@ impl Future for ExecFuture {
 
 static KILL_MACROS: AtomicBool = AtomicBool::new(false);
 
+struct TilesMacro;
+
+impl Macro for TilesMacro {
+    fn name(&self) -> Cow<'static, [u8]> { Cow::Borrowed(b"tiles") }
+    fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(
+        &self,
+        _x: &'exec macrosia::Executor,
+        _v: &'reg mut VariableRegistry,
+        _r: &mut macrosia::rand::rngs::SmallRng,
+        _args: &mut dyn Iterator<Item = &'arg [u8]>
+    ) -> Result<Cow<'static, [u8]>, MacroError> {
+        Err("TODO: this is gonna be a nightmare to implement but i will do it. trust me.")?;
+        unreachable!()
+    }
+    fn clone(&self) -> Box<dyn macrosia::Macro> { Box::new(Self) }
+}
+
 #[wasm_bindgen]
 pub fn cancel_running_macro() {
     KILL_MACROS.store(true, Ordering::Relaxed)
@@ -94,6 +112,8 @@ pub fn initialize_executor(database_macros: Array) {
                 source: Arc::new(value.into_bytes()),
             })
         }
+
+        exec.add_macro(TilesMacro);
 
         exec.with_stdlib()
     });

@@ -1,15 +1,18 @@
 //! Defines some basic macros for regular use.
 
-
+use crate::{Macro, MacroError, Number, var_reg::VariableRegistry};
 use base64::Engine;
-use regex::Regex;
-use rand::Rng;
-use itertools::Itertools as _;
-use rand::SeedableRng;
-use std::{borrow::Cow, cmp::Ordering, ops::{Add as _, Mul as _}, sync::OnceLock};
-use crate::{var_reg::VariableRegistry, Macro, MacroError, Number};
 use const_format::concatcp;
-
+use itertools::Itertools as _;
+use rand::Rng;
+use rand::SeedableRng;
+use regex::Regex;
+use std::{
+    borrow::Cow,
+    cmp::Ordering,
+    ops::{Add as _, Mul as _},
+    sync::OnceLock,
+};
 
 macro_rules! regex {
     ($re:literal $(,)?) => {{
@@ -41,7 +44,6 @@ macro_rules! args {
         let $vararg = iter;
     };
 }
-
 
 macro_rules! def_macro {
     ($($(#[$meta: meta])* $vis: vis macro $sname: ident [ $name: literal ] $args: tt + $x: ident, $v: ident, $r: ident $body: tt)*) => {$(
@@ -95,11 +97,13 @@ fn unescape(str: &[u8]) -> Cow<'_, [u8]> {
                         cons.extend(&str[..i - 1]);
                         construct = Some(cons);
                     }
-                },
+                }
                 // If the character isn't a valid escape, we need to push a backslash,
                 // since we skipped it last loop (see below)
-                _ => if let Some(ref mut c) = construct {
-                    c.push(b'\\')
+                _ => {
+                    if let Some(ref mut c) = construct {
+                        c.push(b'\\')
+                    }
                 }
             }
             // Note: Code flows into the `if let Some(...)`
@@ -119,12 +123,20 @@ fn unescape(str: &[u8]) -> Cow<'_, [u8]> {
 
 #[cfg(test)]
 mod test {
-    use super::{unescape, Cow};
+    use super::{Cow, unescape};
     #[test]
     fn test_unescape() {
         macro_rules! check {
-            ($a: literal -> borrowed $b: literal) => { { let v = unescape($a); assert!(matches!(v, Cow::Borrowed(_))); assert_eq!(&*v, &*$b); } };
-            ($a: literal -> owned $b: literal) => { { let v = unescape($a); assert!(matches!(v, Cow::Owned(_))); assert_eq!(&*v, &*$b); } }
+            ($a: literal -> borrowed $b: literal) => {{
+                let v = unescape($a);
+                assert!(matches!(v, Cow::Borrowed(_)));
+                assert_eq!(&*v, &*$b);
+            }};
+            ($a: literal -> owned $b: literal) => {{
+                let v = unescape($a);
+                assert!(matches!(v, Cow::Owned(_)));
+                assert_eq!(&*v, &*$b);
+            }};
         }
         check!(b"abcde" -> borrowed b"abcde");
         check!(br"a\bcde" -> borrowed br"a\bcde");
@@ -135,7 +147,10 @@ mod test {
 }
 
 fn is_truthy(value: &[u8]) -> bool {
-    !matches!(value, b"false" | b"0" | b"False" | b"0.0" | b"0.0+0.0j" | b"0+0j" | b"0j" | b"")
+    !matches!(
+        value,
+        b"false" | b"0" | b"False" | b"0.0" | b"0.0+0.0j" | b"0+0j" | b"0j" | b""
+    )
 }
 
 def_macro! {
@@ -798,15 +813,109 @@ def_macro! {
         ))
     }
 
-    /*
     /// Gets a slice of the given arguments.
     /// # Arguments
     /// 1. The slice, of the form `<start>[:<stop>[:<step>]]`.
     /// 2... The arguments to slice.
-    pub macro Argslice [b"argslice"] (slice, ...args) + _x, _v, _r {
-        todo!()
+    pub macro Argslice [b"argslice"] (slice, ...args) + _x, _v, _r  {
+        let mut slice = slice.split(|b| *b == b':');
+        let start = slice.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
+        let end = slice.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
+        let step = slice.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
+        let args = args.collect::<Vec<_>>();
+        let mut start = start.unwrap_or(1);
+        if start == 0 { Err("slice cannot start at 0 - argslice slice is 1-indexed")? }
+        if start < 0 { start = args.len() as i64 + start; } else { start = start - 1; }
+        let mut end = end.unwrap_or(args.len() as i64 + 1);
+        if end == 0 { Err("slice cannot start at 0 - argslice slice is 1-indexed")? }
+        if end < 0 { end = args.len() as i64 + end; } else { end = end - 1; }
+        let step = step.unwrap_or(1);
+        if end < start { Err("slice end cannot be less than start")? }
+        if step == 0 { Err("cannot have a step size of 0")? }
+        if step < 0 {
+            return Ok(Cow::Owned(
+                args.iter().rev()
+                .skip(start as usize)
+                .take((end - start) as usize)
+                .step_by(step as usize)
+                .map(|v| *v).intersperse(b"/" as &[u8])
+                .flatten().copied().collect()
+            ));
+        }
+        return Ok(Cow::Owned(
+                args.iter()
+                .skip(start as usize)
+                .take((end - start) as usize)
+                .step_by(step as usize)
+                .map(|v| *v).intersperse(b"/" as &[u8])
+                .flatten().copied().collect()
+            ));
     }
-    */
+
+    /// Converts its first argument to hexadecimal.
+    /// # Arguments
+    /// 1. The number to convert.
+    pub macro Hex [b"hex"] (val) + _x, _v, _r {
+        let val = Number::try_from(val).map(i64::from)?;
+        Ok(Cow::Owned(format!("{val:#x}").into_bytes()))
+    }
+
+    /// Converts its first argument to octal.
+    /// # Arguments
+    /// 1. The number to convert.
+    pub macro Oct [b"oct"] (val) + _x, _v, _r {
+        let val = Number::try_from(val).map(i64::from)?;
+        Ok(Cow::Owned(format!("{val:#o}").into_bytes()))
+    }
+
+    /// Converts its first argument to binary.
+    /// # Arguments
+    /// 1. The number to convert.
+    pub macro Bin [b"bin"] (val) + _x, _v, _r {
+        let val = Number::try_from(val).map(i64::from)?;
+        Ok(Cow::Owned(format!("{val:#b}").into_bytes()))
+    }
+
+    /// Converts its first argument to ASCII lowercase.
+    /// # Arguments
+    /// 1. The string to convert.
+    pub macro Lower [b"lower"] (val) + _x, _v, _r {
+        Ok(Cow::Owned(val.iter().map(|c| c.to_ascii_lowercase()).collect()))
+    }
+
+    /// Converts its first argument to ASCII uppercase.
+    /// # Arguments
+    /// 1. The string to convert.
+    pub macro Upper [b"upper"] (val) + _x, _v, _r {
+        Ok(Cow::Owned(val.iter().map(|c| c.to_ascii_uppercase()).collect()))
+    }
+
+    /// Converts its first argument to ASCII title case.
+    /// # Arguments
+    /// 1. The string to convert.
+    pub macro Title [b"title"] (val) + _x, _v, _r {
+        let mut buf = Vec::new();
+        for substr in val.split(|c| c.is_ascii_whitespace()) {
+            if substr.len() == 0 { continue; }
+            buf.try_reserve(1)?;
+            buf.push(substr[0].to_ascii_uppercase());
+            buf.try_reserve(substr[1..].len())?;
+            buf.extend(substr[1..].iter().map(|c| c.to_ascii_lowercase()));
+        }
+        Ok(Cow::Owned(buf))
+    }
+
+    /// Checks if a variable exists.
+    /// # Arguments
+    /// 1. The variable name to check.
+    pub macro IsStored [b"is_stored"] (val) + _x, v, _r {
+        Ok(Cow::Borrowed(v.load(val).map_or(b"false", |_| b"true")))
+    }
+
+    /// Gets the current execution step number.
+    pub macro Step [b"step"] () + x, _v, _r {
+        Ok(Cow::Owned(format!("{}", x.step()).into_bytes()))
+    }
 }
 
 /// Static block of bytes that can be used to turn a `u8` into a `&'static u8`.

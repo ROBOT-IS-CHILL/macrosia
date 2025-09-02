@@ -5,15 +5,17 @@
 
 use std::borrow::Cow;
 
-mod number;
-mod macro_trait;
-pub mod stdlib;
-mod var_reg;
 mod exec;
+mod macro_trait;
+mod number;
+pub mod stdlib;
 mod text_macro;
+mod var_reg;
 
-pub use macro_trait::{MacroError, Macro};
-pub use number::Number;
+pub use rand;
+
 pub use exec::Executor;
-pub use var_reg::VariableRegistry;
+pub use macro_trait::{Macro, MacroError};
+pub use number::Number;
 pub use text_macro::TextMacro;
+pub use var_reg::VariableRegistry;

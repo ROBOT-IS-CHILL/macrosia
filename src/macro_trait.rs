@@ -1,16 +1,15 @@
-
 use std::collections::TryReserveError;
 use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 
-use crate::var_reg::VariableRegistry;
 use crate::Cow;
+use crate::var_reg::VariableRegistry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// An error struct representing what went wrong during a macro call.
 pub struct MacroError {
     pub(crate) message: Cow<'static, str>,
-    pub(crate) trace: Vec<Vec<u8>>
+    pub(crate) trace: Vec<Vec<u8>>,
 }
 
 impl MacroError {
@@ -24,28 +23,43 @@ impl MacroError {
 
 impl From<&'static str> for MacroError {
     fn from(value: &'static str) -> Self {
-        Self { message: Cow::Borrowed(value), trace: Vec::new() }
+        Self {
+            message: Cow::Borrowed(value),
+            trace: Vec::new(),
+        }
     }
 }
 impl From<Utf8Error> for MacroError {
     fn from(_value: Utf8Error) -> Self {
-        Self { message: Cow::Borrowed("string was not valid UTF-8"), trace: Vec::new() }
+        Self {
+            message: Cow::Borrowed("string was not valid UTF-8"),
+            trace: Vec::new(),
+        }
     }
 }
 impl From<TryReserveError> for MacroError {
     fn from(_value: TryReserveError) -> Self {
-        Self { message: Cow::Borrowed("ran out of memory"), trace: Vec::new() }
+        Self {
+            message: Cow::Borrowed("ran out of memory"),
+            trace: Vec::new(),
+        }
     }
 }
 impl From<FromUtf8Error> for MacroError {
     fn from(_value: FromUtf8Error) -> Self {
-        Self { message: Cow::Borrowed("string was not valid UTF-8"), trace: Vec::new() }
+        Self {
+            message: Cow::Borrowed("string was not valid UTF-8"),
+            trace: Vec::new(),
+        }
     }
 }
 
 impl From<String> for MacroError {
     fn from(value: String) -> Self {
-        Self { message: Cow::Owned(value), trace: Vec::new() }
+        Self {
+            message: Cow::Owned(value),
+            trace: Vec::new(),
+        }
     }
 }
 
@@ -74,6 +88,6 @@ pub trait Macro: Send + Sync {
         rng: &mut rand::rngs::SmallRng,
         args: &mut dyn Iterator<Item = &'arg [u8]>,
     ) -> Result<Cow<'static, [u8]>, MacroError>;
-
+    /// Clones this macro into a box;
     fn clone(&self) -> Box<dyn Macro>;
 }
