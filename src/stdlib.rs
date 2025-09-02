@@ -46,13 +46,17 @@ macro_rules! args {
 }
 
 macro_rules! def_macro {
-    ($($(#[$meta: meta])* $vis: vis macro $sname: ident [ $name: literal ] $args: tt + $x: ident, $v: ident, $r: ident $body: tt)*) => {$(
-        $(#[$meta])*
+    ($($(#[doc = $doc: literal])* $(@ $deprecated: ident;)? $vis: vis macro $sname: ident [ $name: literal ] $args: tt + $x: ident, $v: ident, $r: ident $body: tt)*) => {$(
+        $(#[doc = $doc])*
+        $(#[$deprecated])?
         #[derive(Copy, Clone)]
         $vis struct $sname;
         #[allow(deprecated)]
         impl Macro for $sname {
-            fn name(&self) -> Cow<'static, [u8]> { Cow::Borrowed($name) }
+            fn name(&self) -> &[u8] { $name }
+            fn description(&self) -> &str {
+                concat!($($doc, "\n"),*)
+            }
             fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(&self, $x: &'exec crate::exec::Executor, $v: &'reg mut VariableRegistry, $r: &mut rand::rngs::SmallRng, args: &mut dyn Iterator<Item = &'arg [u8]>) -> Result<Cow<'static, [u8]>, MacroError> {
                 args!($args <- args);
                 $body
@@ -384,8 +388,8 @@ def_macro! {
         Ok(Cow::Borrowed(if is_truthy(value) {b"true"} else {b"false"}))
     }
 
-    #[deprecated]
     /// Returns its first argument. Legacy alias for compatiblity reasons.
+    @deprecated;
     pub macro ToFloat [b"to_float"] (value) + _x, _v, _r {
         Ok(Cow::Owned(value.to_vec()))
     }
@@ -478,7 +482,7 @@ def_macro! {
         Ok(Cow::Owned(format!("{n}").into_bytes()))
     }
 
-    /// Converts each argument to an integer.
+    /// Joins each argument.
     /// # Arguments
     /// 1. The string to join each value with.
     /// 2... Strings to join.
@@ -486,6 +490,17 @@ def_macro! {
         Ok(Cow::Owned(
             iter.intersperse(sep)
                 .flatten()
+                .copied()
+                .collect()
+        ))
+    }
+
+    /// Joins each argument with an empty string.
+    /// # Arguments
+    /// 1... Strings to join.
+    pub macro Concat [b"concat"] (...iter) + _x, _v, _r {
+        Ok(Cow::Owned(
+            iter.flatten()
                 .copied()
                 .collect()
         ))
@@ -915,6 +930,28 @@ def_macro! {
     /// Gets the current execution step number.
     pub macro Step [b"step"] () + x, _v, _r {
         Ok(Cow::Owned(format!("{}", x.step()).into_bytes()))
+    }
+
+    /// Finds the amount of occurrences of a string within another, optionally between a given range.
+    /// # Arguments
+    /// 1. The value to search.
+    /// 2. The value to search for.
+    /// 3? The start index. Defaults to 0.
+    /// 4? The end index. Defaults to the length of the string.
+    pub macro Count [b"count"] (haystack, needle, ...iter) + _x, _v, _r {
+        let mut start = iter.next().map(Number::try_from).transpose()?.map(i64::from).unwrap_or(0);
+        let end = iter.next().map(Number::try_from).transpose()?.map(i64::from).unwrap_or(haystack.len() as i64);
+        if start < 0 { start += haystack.len() as i64 }
+        if start < 0 { return Err("search start cannot be before string start")? }
+        if end > haystack.len() as i64 { return Err("search end cannot be larger than string")? };
+        let mut haystack = haystack.get(start as usize .. end as usize).ok_or("haystack slice failed")?;
+        let mut count = 0;
+        if needle.len() > haystack.len() { return Ok(Cow::Borrowed(b"0")) }
+        while let Some(idx) = haystack.windows(needle.len()).position(|w| w == needle) {
+            count += 1;
+            haystack = &haystack[idx + needle.len()..];
+        }
+        Ok(Cow::Owned(format!("{count}").into_bytes()))
     }
 }
 

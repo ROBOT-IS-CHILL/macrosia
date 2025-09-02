@@ -11,18 +11,25 @@ use crate::Macro;
 pub struct TextMacro {
     /// The source backing the macro.
     pub source: Arc<Vec<u8>>,
+    /// The macro's description.
+    pub description: Arc<String>,
     /// The macro's name.
     pub name: Arc<Vec<u8>>,
 }
 
 impl Macro for TextMacro {
-    fn name(&self) -> Cow<'static, [u8]> {
-        Cow::Owned(Vec::clone(&*self.name))
+    fn name(&self) -> &[u8] {
+        &*self.name
+    }
+
+    fn description(&self) -> &str {
+        &*self.description
     }
 
     fn clone(&self) -> Box<dyn Macro> {
         Box::new(TextMacro {
             source: self.source.clone(),
+            description: self.description.clone(),
             name: self.name.clone(),
         })
     }

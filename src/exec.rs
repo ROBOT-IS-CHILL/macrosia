@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    cell::Cell,
     collections::HashMap,
     hash::BuildHasherDefault,
     iter::FromFn,
@@ -11,7 +10,7 @@ use rand::SeedableRng;
 
 use crate::{Macro, MacroError, var_reg::VariableRegistry};
 
-type MacroMap = HashMap<Cow<'static, [u8]>, Box<dyn Macro>, BuildHasherDefault<seahash::SeaHasher>>;
+type MacroMap = HashMap<Vec<u8>, Box<dyn Macro>, BuildHasherDefault<seahash::SeaHasher>>;
 
 /// An executor interface for Macrosia.
 pub struct Executor {
@@ -89,7 +88,7 @@ impl Executor {
     }
 
     fn add_macro_mono(&mut self, mac: Box<dyn Macro>) {
-        self.macros.insert(mac.name(), mac);
+        self.macros.insert(Vec::from(mac.name()), mac);
     }
 
     fn find_first_block(str: &[u8]) -> Option<[usize; 2]> {

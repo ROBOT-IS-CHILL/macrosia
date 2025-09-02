@@ -13,9 +13,12 @@ pub struct MacroError {
 }
 
 impl MacroError {
+    /// Returns the error message.
     pub fn message(&self) -> &str {
         &*self.message
     }
+
+    /// Returns a traceback for the given error, in reverse order.
     pub fn trace(&self) -> &[Vec<u8>] {
         &self.trace
     }
@@ -79,7 +82,9 @@ impl std::error::Error for MacroError {}
 /// Defines a struct as a macro.
 pub trait Macro: Send + Sync {
     /// The macro's defined name.
-    fn name(&self) -> Cow<'static, [u8]>;
+    fn name(&self) -> &[u8];
+    /// The macro's description.
+    fn description(&self) -> &str;
     /// Evaluates the macro.
     fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(
         &self,
