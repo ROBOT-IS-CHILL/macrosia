@@ -10,46 +10,60 @@ use crate::Cow;
 /// An error struct representing what went wrong during a macro call.
 pub struct MacroError {
     pub(crate) message: Cow<'static, str>,
-    pub(crate) context: String
+    pub(crate) trace: Vec<Vec<u8>>
+}
+
+impl MacroError {
+    pub fn message(&self) -> &str {
+        &*self.message
+    }
+    pub fn trace(&self) -> &[Vec<u8>] {
+        &self.trace
+    }
 }
 
 impl From<&'static str> for MacroError {
     fn from(value: &'static str) -> Self {
-        Self { message: Cow::Borrowed(value), context: String::new() }
+        Self { message: Cow::Borrowed(value), trace: Vec::new() }
     }
 }
 impl From<Utf8Error> for MacroError {
     fn from(_value: Utf8Error) -> Self {
-        Self { message: Cow::Borrowed("string was not valid UTF-8"), context: String::new() }
+        Self { message: Cow::Borrowed("string was not valid UTF-8"), trace: Vec::new() }
     }
 }
 impl From<TryReserveError> for MacroError {
     fn from(_value: TryReserveError) -> Self {
-        Self { message: Cow::Borrowed("ran out of memory"), context: String::new() }
+        Self { message: Cow::Borrowed("ran out of memory"), trace: Vec::new() }
     }
 }
 impl From<FromUtf8Error> for MacroError {
     fn from(_value: FromUtf8Error) -> Self {
-        Self { message: Cow::Borrowed("string was not valid UTF-8"), context: String::new() }
+        Self { message: Cow::Borrowed("string was not valid UTF-8"), trace: Vec::new() }
     }
 }
 
 impl From<String> for MacroError {
     fn from(value: String) -> Self {
-        Self { message: Cow::Owned(value), context: String::new() }
+        Self { message: Cow::Owned(value), trace: Vec::new() }
     }
 }
 
 impl std::fmt::Display for MacroError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error while expanding this block: {}\n{}", self.context, self.message)
+        writeln!(f, "{}\n\nTraceback:", self.message)?;
+        for step in self.trace.iter().rev() {
+            writeln!(f, "-----")?;
+            writeln!(f, "{}", String::from_utf8_lossy(step))?;
+        }
+        writeln!(f, "-----")
     }
 }
 
 impl std::error::Error for MacroError {}
 
 /// Defines a struct as a macro.
-pub trait Macro {
+pub trait Macro: Send + Sync {
     /// The macro's defined name.
     fn name(&self) -> Cow<'static, [u8]>;
     /// Evaluates the macro.
@@ -60,4 +74,6 @@ pub trait Macro {
         rng: &mut rand::rngs::SmallRng,
         args: &mut dyn Iterator<Item = &'arg [u8]>,
     ) -> Result<Cow<'static, [u8]>, MacroError>;
+
+    fn clone(&self) -> Box<dyn Macro>;
 }

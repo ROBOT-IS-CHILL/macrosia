@@ -1,14 +1,22 @@
 //! Defines some basic macros for regular use.
 
 
+use base64::Engine;
 use regex::Regex;
 use rand::Rng;
 use itertools::Itertools as _;
 use rand::SeedableRng;
-use std::{borrow::Cow, ops::{Add as _, Mul as _}, cmp::Ordering};
+use std::{borrow::Cow, cmp::Ordering, ops::{Add as _, Mul as _}, sync::OnceLock};
 use crate::{var_reg::VariableRegistry, Macro, MacroError, Number};
 use const_format::concatcp;
 
+
+macro_rules! regex {
+    ($re:literal $(,)?) => {{
+        static RE: OnceLock<Regex> = OnceLock::new();
+        RE.get_or_init(|| Regex::new($re).unwrap())
+    }};
+}
 
 macro_rules! count {
     ($tt: tt $($tts: tt)*) => {
@@ -38,6 +46,7 @@ macro_rules! args {
 macro_rules! def_macro {
     ($($(#[$meta: meta])* $vis: vis macro $sname: ident [ $name: literal ] $args: tt + $x: ident, $v: ident, $r: ident $body: tt)*) => {$(
         $(#[$meta])*
+        #[derive(Copy, Clone)]
         $vis struct $sname;
         #[allow(deprecated)]
         impl Macro for $sname {
@@ -46,6 +55,7 @@ macro_rules! def_macro {
                 args!($args <- args);
                 $body
             }
+            fn clone(&self) -> Box<dyn Macro> { Box::new(*self) }
         }
     )*
 
@@ -136,7 +146,7 @@ def_macro! {
 
     /// Adds all arguments, returning their sum.
     /// # Arguments
-    /// - \[Variadic\] Any amount of strings coercible to numbers.
+    /// 1... Any amount of strings coercible to numbers.
     pub macro Add [b"add"] (... args) + _x, _v, _r {
         args
             .map(|v| Number::try_from(&*v))
@@ -147,7 +157,7 @@ def_macro! {
 
     /// Multiplies all arguments, returning their product.
     /// # Arguments
-    /// - \[Variadic\] Any amount of strings coercible to numbers.
+    /// 1... Any amount of strings coercible to numbers.
     pub macro Multiply [b"multiply"] (... args) + _x, _v, _r {
         args
             .map(|v| Number::try_from(&*v))
@@ -207,6 +217,14 @@ def_macro! {
     /// 2. The number to compare against.
     pub macro NumEqual [b"num_equal"] (a, b) + _x, _v, _r {
         let [a, b]: [Number; 2] = [a.try_into()?, b.try_into()?];
+        Ok(Cow::Borrowed(if a == b { b"true" } else { b"false" }))
+    }
+
+    /// Checks if two strings are equal.
+    /// # Arguments
+    /// 1. The string to compare.
+    /// 2. The string to compare against.
+    pub macro Equal [b"equal"] (a, b) + _x, _v, _r {
         Ok(Cow::Borrowed(if a == b { b"true" } else { b"false" }))
     }
 
@@ -372,8 +390,8 @@ def_macro! {
     /// Replaces a string within another string, using plain string matching.
     /// # Arguments
     /// 1. The string to replace substrings of
-    /// 2. \[Variadic\] The substring to replace
-    /// 3. \[Variadic\] The string to replace the substring with
+    /// 2... The substring to replace
+    /// 3... The string to replace the substring with
     pub macro SReplace [b"sreplace"] (haystack, ...iter) + _x, _v, _r {
         let mut haystack = Vec::from(haystack);
         for mut chunk in &iter.chunks(2) {
@@ -405,7 +423,7 @@ def_macro! {
     /// # Arguments
     /// 1. The string to repeat.
     /// 2. The amount of times to repeat the string.
-    /// 3. \[Optional\] The separator between each string.
+    /// 3? The separator between each string.
     pub macro Repeat [b"repeat"] (times, value, ...iter) + _x, _v, _r {
         let joiner = iter.next().unwrap_or(b"");
         let count = Number::try_from(times).map(|v| i64::from(v))?;
@@ -419,12 +437,43 @@ def_macro! {
 
     /// Creates a random value on the range [0, 1).
     /// # Arguments
-    /// 1. \[Optional\] A string to seed the RNG with.
+    /// 1? A string to seed the RNG with.
     pub macro Random [b"rand"] (...iter) + _x, _v, r {
         if let Some(seed) = iter.next() {
             *r = rand::rngs::SmallRng::seed_from_u64(seahash::hash(seed));
         }
         Ok(Cow::Owned(format!("{}", r.random::<f64>()).into_bytes()))
+    }
+
+    /// Converts the first argument to an integer.
+    /// # Arguments
+    /// 1. The number to convert to an integer.
+    /// 2? The base to convert from. Defaults to 10. Must be between 2 and 36.
+    pub macro Int [b"int"] (num, ...iter) + _x, _v, _r {
+        let base = Number::try_from(iter.next().unwrap_or(b"10")).map(i64::from)?;
+        if !(2..=36).contains(&base) {
+            return Err("base must be between 2 and 36 inclusive")?
+        }
+        let n = if base == 10 {
+            Number::try_from(num).map(i64::from)?
+        } else {
+            let str = str::from_utf8(num)?;
+            i64::from_str_radix(str, base as u32).map_err(|_| "invalid integer for given base")?
+        };
+        Ok(Cow::Owned(format!("{n}").into_bytes()))
+    }
+
+    /// Converts each argument to an integer.
+    /// # Arguments
+    /// 1. The string to join each value with.
+    /// 2... Strings to join.
+    pub macro Join [b"join"] (sep, ...iter) + _x, _v, _r {
+        Ok(Cow::Owned(
+            iter.intersperse(sep)
+                .flatten()
+                .copied()
+                .collect()
+        ))
     }
 
     /// Hashes the given value.
@@ -452,9 +501,9 @@ def_macro! {
 
     /// Raises an error with a specified message.
     /// # Arguments
-    /// 1. \[Optional\] The error message. Defaults to `<unspecified>`.
-    pub macro Error [b"error"] (msg) + _x, _v, _r {
-        Err(String::from_utf8_lossy(msg).into_owned().into())
+    /// 1? The error message. Defaults to `<unspecified>`.
+    pub macro Error [b"error"] (...msg) + _x, _v, _r {
+        Err(String::from_utf8_lossy(msg.next().unwrap_or(b"<unspecified>")).into_owned().into())
     }
 
     /// Converts the given bytestring to UTF-8 lossily, replacing errors with `U+FFFD`.
@@ -469,10 +518,13 @@ def_macro! {
     /// Replaces a string within another string, using regex matching.
     /// All arguments must be valid UTF-8.
     ///
+    /// Note that for legacy reasons, this uses `\1` instead of `$1`,
+    /// to emulate Python's regex.
+    ///
     /// # Arguments
     /// 1. The string to replace substrings of
-    /// 2. \[Variadic\] The substring to replace
-    /// 3. \[Variadic\] The string to replace the substring with
+    /// 2... The substring to replace
+    /// 3... The string to replace the substring with
     pub macro Replace [b"replace"] (haystack, ...iter) + _x, _v, _r {
         let mut haystack = String::from_utf8(haystack.to_vec())?;
         for mut chunk in &iter.chunks(2) {
@@ -483,7 +535,13 @@ def_macro! {
                 Err("search pattern value cannot be empty")?
             }
             let Some(value) = chunk.next() else { return Err("replace requires an odd number of arguments")?; };
-            let replacement = str::from_utf8(value)?;
+            let mut replacement = str::from_utf8(value)?.to_string();
+            replacement = replacement.replace("$", "$$");
+            replacement = regex!(r"\\g<([a-zA-Z_][a-zA-Z_0-9]*)>")
+                .replace_all(&replacement, r"$$$1").to_string();
+            replacement = regex!(r"\\(\d+)")
+                .replace_all(&replacement, r"$$$1").to_string();
+
             let pat = Regex::new(needle).map_err(|_| format!("invalid regex pattern: {needle}"))?;
             haystack = pat.replace_all(&haystack, replacement).into_owned();
         }
@@ -496,8 +554,8 @@ def_macro! {
     ///
     /// # Arguments
     /// 1. The string to replace substrings of
-    /// 2. \[Variadic\] The substring to replace
-    /// 3. \[Variadic\] The string to replace the substring with
+    /// 2... The substring to replace
+    /// 3... The string to replace the substring with
     pub macro UReplace [b"ureplace"] (haystack, ...iter) + _x, _v, _r {
         let mut haystack = String::from_utf8(haystack.to_vec())?;
         for mut chunk in &iter.chunks(2) {
@@ -526,20 +584,20 @@ def_macro! {
     /// 2. The start of the range to repeat on
     /// 3. The end of the range to repeat on
     /// 4. The string to repeat
-    /// 5. \[Optional\] The separator between repetitions
+    /// 5? The separator between repetitions
     ///
     /// # Examples
     /// > `[sequence/@/1/5/(@)/,]` -> `(1),(2),(3),(4),(5)`
     /// > `[sequence/@/1/3/@]` -> `123`
-    pub macro Sequence [b"Sequence"] (needle, start, end, haystack, ...iter) + _x, _v, _r {
+    pub macro Sequence [b"sequence"] (needle, start, end, haystack, ...iter) + _x, _v, _r {
         let joiner = str::from_utf8(iter.next().unwrap_or(b""))?;
         let start = Number::try_from(start).map(|v| i64::from(v))?;
         let end = Number::try_from(end).map(|v| i64::from(v))?;
-        if end >= start { return Ok(Cow::Borrowed(b"")) };
+        if end <= start { return Ok(Cow::Borrowed(b"")) };
         let haystack = str::from_utf8(haystack)?;
         let needle = str::from_utf8(needle)?;
         let mut buf = String::new();
-        for i in start .. end {
+        for i in start ..= end {
             let mut h = String::new();
             h.try_reserve(haystack.len())?;
             h.push_str(haystack);
@@ -556,10 +614,10 @@ def_macro! {
 
     /// Chooses between a set of return values from a chain of booleans.
     /// # Arguments
-    /// 1. \[Variadic\] A condition to check.
-    /// 2. \[Variadic\] The value to return if the condition is true.
+    /// 1... A condition to check.
+    /// 2... The value to return if the condition is true.
     /// ...
-    /// n. \[Optional\] The value to return if no conditions are true. If this is not supplied, will return the empty string if reached.
+    /// n? The value to return if no conditions are true. If this is not supplied, will return the empty string if reached.
     pub macro If [b"if"] (...iter) + _x, _v, _r {
         for mut chunk in &iter.chunks(2) {
             let cond = chunk.next().expect("first of chunk always exists");
@@ -574,7 +632,7 @@ def_macro! {
 
     /// Takes the boolean and of all inputs.
     /// # Arguments
-    /// 1. \[Variadic\] Any value. Will be converted to a boolean.
+    /// 1... Any value. Will be converted to a boolean.
     pub macro And [b"and"] (...iter) + _x, _v, _r {
         Ok(Cow::Borrowed('b: {
             for val in iter {
@@ -586,7 +644,7 @@ def_macro! {
 
     /// Takes the boolean or of all inputs.
     /// # Arguments
-    /// 1. \[Variadic\] Any value. Will be converted to a boolean.
+    /// 1... Any value. Will be converted to a boolean.
     pub macro Or [b"or"] (...iter) + _x, _v, _r {
         Ok(Cow::Borrowed('b: {
             for val in iter {
@@ -602,6 +660,153 @@ def_macro! {
     pub macro Not [b"not"] (val) + _x, _v, _r {
         Ok(Cow::Borrowed(if is_truthy(val) {b"false"} else {b"true"}))
     }
+
+    /// Raises an error with a specified message if the first argument is not truthy.
+    /// # Arguments
+    /// 1. The condition to check.
+    /// 2? The error message. Defaults to `<unspecified>`.
+    pub macro Assert [b"assert"] (val, ...msg) + _x, _v, _r {
+        if !is_truthy(val) {
+            return Err(String::from_utf8_lossy(msg.next().unwrap_or(b"<unspecified>")).into_owned())?
+        }
+        Ok(b"".into())
+    }
+
+    /// Decodes some given Base64.
+    /// # Arguments
+    /// 1... The Base64 string to decode.
+    pub macro Base64Decode [b"base64.decode"] (...val) + _x, _v, _r {
+        let engine = base64::engine::general_purpose::STANDARD;
+        let joined = val.intersperse(b"/").flatten().copied().collect::<Vec<_>>();
+        let mut buf = Vec::new();
+        buf.try_reserve(base64::decoded_len_estimate(joined.len()))?;
+        unsafe {
+            let sbuf = buf.spare_capacity_mut();
+            std::ptr::write_bytes(sbuf.as_mut_ptr(), 0, sbuf.len());
+            let len = sbuf.len();
+            buf.set_len(len);
+        }
+        let written_len = engine.decode_slice(joined, &mut buf).map_err(|_| "failed to decode base64")?;
+        buf.truncate(written_len);
+        Ok(Cow::Owned(buf))
+    }
+
+    /// Encodes some given data to Base64.
+    /// # Arguments
+    /// 1... The string to encode.
+    pub macro Base64Encode [b"base64.encode"] (...val) + _x, _v, _r {
+        let engine = base64::engine::general_purpose::STANDARD;
+        let joined = val.intersperse(b"/").flatten().copied().collect::<Vec<_>>();
+        let mut buf = Vec::new();
+        buf.try_reserve(base64::encoded_len(joined.len(), false).ok_or("base64 value is way too large")?)?;
+        unsafe {
+            let sbuf = buf.spare_capacity_mut();
+            std::ptr::write_bytes(sbuf.as_mut_ptr(), 0, sbuf.len());
+            let len = sbuf.len();
+            buf.set_len(len);
+        }
+        let written = engine.encode_slice(joined, &mut buf).map_err(|_| "failed to encode base64")?;
+        buf.truncate(written);
+        Ok(Cow::Owned(buf))
+    }
+
+    /// Gets the amount of seconds since January 1, 1970, 00:00 GMT.
+    pub macro UnixTime [b"unixtime"] () + _x, _v, _r {
+        let time = web_time::SystemTime::now();
+        let since = time.duration_since(web_time::SystemTime::UNIX_EPOCH).map_err(|_| "getting time since unix epoch failed")?;
+        Ok(Cow::Owned(format!("{:0.3}", since.as_secs_f64()).into_bytes()))
+    }
+
+    /// Slices the given string by a start, stop, and optional step, based on UTF-8 characters.
+    /// The string must be valid UTF-8.
+    /// # Arguments
+    /// 1. The string to slice.
+    /// 2? The slice start.
+    /// 3? The slice end.
+    /// 4? The slice step.
+    pub macro Slice [b"slice"] (haystack, ...args) + _x, _v, _r {
+        let start = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
+        let end = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
+        let step = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
+        let mut start = start.unwrap_or(0);
+        let haystack = str::from_utf8(haystack)?;
+        let clen = haystack.chars().count();
+        if start < 0 { start = clen as i64 + start; }
+        if start >= clen as i64  { return Ok(Cow::Borrowed(b"")); }
+        let mut end = end.unwrap_or(clen as i64);
+        if end < 0 { end = clen as i64 + end; }
+        if end < 0 { return Ok(Cow::Borrowed(b"")); }
+        let step = step.unwrap_or(1);
+        if end < start { Err("slice end cannot be less than start")? }
+        if step == 0 { Err("cannot have a step size of 0")? }
+        if step < 0 {
+            return Ok(Cow::Owned(haystack.chars().rev().skip(start as usize).take((end - start) as usize).step_by(step as usize).collect::<String>().into_bytes()));
+        }
+        return Ok(Cow::Owned(haystack.chars().skip(start as usize).take((end - start) as usize).step_by(step as usize).collect::<String>().into_bytes()));
+    }
+
+    /// Slices the given string by a start, stop, and optional step, based on bytes.
+    /// # Arguments
+    /// 1. The string to slice.
+    /// 2? The slice start.
+    /// 3? The slice end.
+    /// 4? The slice step.
+    pub macro BSlice [b"bslice"] (haystack, ...args) + _x, _v, _r {
+        let start = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
+        let end = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
+        let step = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
+        let mut start = start.unwrap_or(0);
+        if start < 0 { start = haystack.len() as i64 + start; }
+        let mut end = end.unwrap_or(haystack.len() as i64);
+        if end < 0 { end = haystack.len() as i64 + end; }
+        let step = step.unwrap_or(1);
+        if end < start { Err("slice end cannot be less than start")? }
+        if step == 0 { Err("cannot have a step size of 0")? }
+        if step < 0 {
+            return Ok(Cow::Owned(haystack.iter().copied().rev().skip(start as usize).take((end - start) as usize).step_by(step as usize).collect::<Vec<u8>>()));
+        }
+        return Ok(Cow::Owned(haystack.iter().copied().skip(start as usize).take((end - start) as usize).step_by(step as usize).collect::<Vec<u8>>()));
+    }
+
+    /// Splits a string into a list by a delimiter, and then indexes into that list.
+    /// # Arguments
+    /// 1. The value to split.
+    /// 2. The list delimiter.
+    /// 3. The index to grab.
+    pub macro Split [b"split"] (array, delim, index) + _x, _v, _r {
+        let mut index = Number::try_from(index).map(i64::from)?;
+        let mut vec = Vec::new();
+        let mut array = array;
+        while let Some(idx) = array.windows(delim.len()).position(|w| w == delim) {
+            vec.try_reserve(1)?;
+            vec.push(&array[..idx]);
+            array = &array[idx + delim.len()..];
+        }
+        vec.push(array);
+        if index < 0 {
+            index = array.len() as i64 + index;
+        }
+        Ok(Cow::Owned(Vec::from(*vec.get(index as usize).ok_or("index out of bounds")?)))
+    }
+
+    /// Checks if macros exist within the execution context.
+    /// # Arguments
+    /// 1... The macro names to check.
+    pub macro IsMacro [b"macro"] (...args) + x, _v, _r {
+        Ok(Cow::Owned(
+            args.map(|arg| -> &[u8] { if x.macros().get(arg).is_some() { b"true" } else { b"false" } } ).intersperse(b"/").flatten().copied().collect::<Vec<_>>()
+        ))
+    }
+
+    /*
+    /// Gets a slice of the given arguments.
+    /// # Arguments
+    /// 1. The slice, of the form `<start>[:<stop>[:<step>]]`.
+    /// 2... The arguments to slice.
+    pub macro Argslice [b"argslice"] (slice, ...args) + _x, _v, _r {
+        todo!()
+    }
+    */
 }
 
 /// Static block of bytes that can be used to turn a `u8` into a `&'static u8`.

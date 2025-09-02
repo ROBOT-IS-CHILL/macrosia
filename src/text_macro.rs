@@ -20,6 +20,10 @@ impl Macro for TextMacro {
         Cow::Owned(Vec::clone(&*self.name))
     }
 
+    fn clone(&self) -> Box<dyn Macro> {
+    	Box::new(TextMacro { source: self.source.clone(), name: self.name.clone() })
+    }
+
 	fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(
         &self,
         exec: &'exec crate::exec::Executor,

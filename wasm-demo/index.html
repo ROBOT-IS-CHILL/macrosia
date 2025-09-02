@@ -100,136 +100,247 @@
       .ace_variable.ace_language {
         font-weight: 500;
       }
+      .ace_std_macro {
+        font-weight: 500;
+        color: #a6fcdb;
+      }
+      .ace_db_macro {
+        font-weight: 500;
+        color: #cba6fc;
+      }
+      .ace_def_macro {
+        font-weight: 500;
+        color: #fcbca6;
+      }
     </style>
   </head>
   <body>
     <div class="vsplit">
       <div class="split">
         <div id="editor">#define infinite_loop [infinite_loop]
-[infinite_loop]</div>
+[infinite_loop]
+
+[mazegen.display/10/10] <- Macros are synced to the database in this demo!
+
+Builtins: (orange ones are currently unimplemented)
+
+[add]
+[and]
+[argslice]
+[assert]
+[base64.decode]
+[base64.encode]
+[bin]
+[byteget]
+[byteset]
+[bytesplice]
+[chr]
+[concat]
+[count]
+[divide]
+[drop]
+[equal]
+[error]
+[find]
+[for]
+[get]
+[hash]
+[hex]
+[if]
+[imag]
+[int]
+[is_number]
+[is_stored]
+[join]
+[json.append]
+[json.get]
+[json.insert]
+[json.keys]
+[json.len]
+[json.remove]
+[json.set]
+[len]
+[less]
+[load]
+[log]
+[lower]
+[macro] <- returns a boolean instead
+[mod]
+[multiply]
+[not]
+[oct]
+[or]
+[ord]
+[pow]
+[rand]
+[real]
+[repeat]
+[replace]
+[sequence]
+[slice]
+[split]
+[store]
+[subtract]
+[tiles] <- like 95% sure this is possible to implement and if not i will make it so it is
+[title]
+[to_boolean]
+[to_float]
+[try] <- will not be implemented due to it being incompatible with the interruptible execution system
+[unescape]
+[unixtime]
+[upper]
+[ureplace]
+[variables]
+[zlib.compress]
+[zlib.decompress]
+</div>
         <textarea readonly disabled id="output"></textarea>
       </div>
       <div class="split">
-        <button id="run">Run</button>
+        <button id="run" disabled>Run</button>
         <a class="doclink" href="./doc/index.html">Documentation</a>
       </div>
     </div>
     <script type="module">
-      import init, { evaluate, get_stdlib_macro_names, cancel_running_macro } from "./pkg/glue.js";
+      import init, { evaluate, get_stdlib_macro_names, initialize_executor, cancel_running_macro } from "./pkg/glue.js";
       const out = document.getElementById("output"); // global
+      const button = document.getElementById("run");
       var wasmInitialized = false; // global
       var editor; // global
-      out.value = "Initializing...";
+      out.value = "Getting database macros...";
       let running = false;
-      init().then(() => {
-        wasmInitialized = true;
+      await init();
 
-        let macro_names = [];
-        for (let name of get_stdlib_macro_names()) {
-          macro_names.push(RegExp.escape(name));
+      wasmInitialized = true;
+
+      let db_macro_names = [];
+
+      try {
+        let res = await fetch('https://ric-api.sno.mba/macros.json?data_only=true&cba', {
+          mode: 'cors'
+        });
+        let data = await res.json();
+        for (let {"name": name} of data) {
+          db_macro_names.push(RegExp.escape(name));
         }
+        initialize_executor(data);
+        button.disabled = false;
+        out.value = "";
+      } catch (err) {
+        initialize_executor([]);
+        button.disabled = false;
+        out.value = `Failed to get macros from RIC database!\nYou can still use builtins, but you'll have to refresh to try to get them again.\nError: ${err}`;
+      }
 
-        ace.define('ace/mode/macrosia', ['require', 'exports', 'module'],
-          function(require, exports, module) {
-            "use strict";
+      let std_macro_names = [];
+      for (let name of get_stdlib_macro_names()) {
+        std_macro_names.push(RegExp.escape(name));
+      }
 
-            let oop = require("ace/lib/oop");
-            let TextMode = require("ace/mode/text").Mode;
-            let Tokenizer = require("ace/tokenizer").Tokenizer;
-            let CstyleBehaviour = require("ace/mode/behaviour/cstyle").CstyleBehaviour;
-            let TextHighlightRules = require("ace/mode/text_highlight_rules").TextHighlightRules;
-            let BaseMode = require("ace/mode/folding/fold_mode").FoldMode;
-            let Range = require("ace/range").Range;
-            let TokenIterator = require("ace/token_iterator").TokenIterator;
+      ace.define('ace/mode/macrosia', ['require', 'exports', 'module'],
+        function(require, exports, module) {
+          "use strict";
 
-            let FoldMode = function() {};
+          let oop = require("ace/lib/oop");
+          let TextMode = require("ace/mode/text").Mode;
+          let Tokenizer = require("ace/tokenizer").Tokenizer;
+          let CstyleBehaviour = require("ace/mode/behaviour/cstyle").CstyleBehaviour;
+          let TextHighlightRules = require("ace/mode/text_highlight_rules").TextHighlightRules;
+          let BaseMode = require("ace/mode/folding/fold_mode").FoldMode;
+          let Range = require("ace/range").Range;
+          let TokenIterator = require("ace/token_iterator").TokenIterator;
 
-            oop.inherits(FoldMode, BaseMode);
+          let FoldMode = function() {};
 
-            (function() {
-                this.foldingStartMarker = /(?<!\\)(?:\\\\)*\[/;
-                this.foldingStopMarker = /(?<!\\)(?:\\\\)*\]/;
-            }).call(BaseMode.prototype);
+          oop.inherits(FoldMode, BaseMode);
 
-            let MacrosiaHighlight = function() {
-                this.$rules = {
-                    "start": [
-                        {
-                          token: "keyword",
-                          regex: /^#define/,
-                          next: "macro_name"
-                        },
-                        {
-                          token: "string",
-                          regex: /\\/,
-                          next: "escaped"
-                        },
-                        {
-                          token: "keyword.operator",
-                          regex: /[\[\]]/,
-                        },
-                        {
-                          token: "keyword.control",
-                          regex: /\//
-                        },
-                        {
-                          token: "storage.type",
-                          regex: `(?<=\\[)(?:${macro_names.join("|")})(?=[\\/\\]])`
-                        },
-                        {
-                          token: "variable.language",
-                          regex: /\$(-?\d+|#|!)/
-                        },
-                        {
-                          token: "string",
-                          regex: /\$(?!-?\d+|#|!)/
-                        },
-                        {
-                          token: "variable.parameter",
-                          regex: /(?<=\[)(?:[^\[\]/\\\$]+)(?=[\/\]])/
-                        },
-                        {
-                          token: "constant.numeric",
-                          regex: /(?<=[\[\/])[-+]?(?:(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)j?|(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)[+-](?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)j)(?=[\/\]])/
-                        },
-                        {
-                          token: "string",
-                          regex: /[^\[\]\/\\\$]+/
-                        },
-                    ],
-                    "escaped": [
+          (function() {
+              this.foldingStartMarker = /(?<!\\)(?:\\\\)*\[/;
+              this.foldingStopMarker = /(?<!\\)(?:\\\\)*\]/;
+          }).call(BaseMode.prototype);
+
+          let MacrosiaHighlight = function() {
+              this.$rules = {
+                  "start": [
+                      {
+                        token: "keyword",
+                        regex: /^#define/,
+                        next: "macro_name"
+                      },
                       {
                         token: "string",
-                        regex: ".",
-                        next: "start"
-                      }
-                    ],
-                    "macro_name": [
+                        regex: /\\/,
+                        next: "escaped"
+                      },
                       {
-                        token: "variable.parameter",
-                        regex: /\s+[^\s]+/,
-                        next: "start"
-                      }
-                    ],
-                };
-            };
+                        token: "keyword.operator",
+                        regex: /[\[\]]/,
+                      },
+                      {
+                        token: "keyword.control",
+                        regex: /\//
+                      },
+                      {
+                        token: "std_macro",
+                        regex: `(?<=\\[)(?:${std_macro_names.join("|")})(?=[\\/\\]])`
+                      },
+                      {
+                        token: "db_macro",
+                        regex: `(?<=\\[)(?:${db_macro_names.join("|")})(?=[\\/\\]])`
+                      },
+                      {
+                        token: "variable.language",
+                        regex: /\$(-?\d+|#|!)/
+                      },
+                      {
+                        token: "string",
+                        regex: /\$(?!-?\d+|#|!)/
+                      },
+                      {
+                        token: "def_macro",
+                        regex: /(?<=\[)(?:[^\[\]/\\\$]+)(?=[\/\]])/
+                      },
+                      {
+                        token: "constant.numeric",
+                        regex: /(?<=[\[\/])[-+]?(?:(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)j?|(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)[+-](?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)j)(?=[\/\]])/
+                      },
+                      {
+                        token: "string",
+                        regex: /[^\[\]\/\\\$]+/
+                      },
+                  ],
+                  "escaped": [
+                    {
+                      token: "string",
+                      regex: ".",
+                      next: "start"
+                    }
+                  ],
+                  "macro_name": [
+                    {
+                      token: "def_macro",
+                      regex: /\s+[^\s]+/,
+                      next: "start"
+                    }
+                  ],
+              };
+          };
 
-            oop.inherits(MacrosiaHighlight, TextHighlightRules);
+          oop.inherits(MacrosiaHighlight, TextHighlightRules);
 
-            let Mode = function() {
-                this.$tokenizer = new Tokenizer(new MacrosiaHighlight().$rules);
-                this.$behaviour = new CstyleBehaviour({ braces: true });
-                this.foldingRules = new FoldMode();
-            };
+          let Mode = function() {
+              this.$tokenizer = new Tokenizer(new MacrosiaHighlight().$rules);
+              this.$behaviour = new CstyleBehaviour({ braces: true });
+              this.foldingRules = new FoldMode();
+          };
 
-            oop.inherits(Mode, TextMode);
+          oop.inherits(Mode, TextMode);
 
-            (function() {
-                this.$id = "ace/mode/macrosia";
-            }).call(Mode.prototype);
+          (function() {
+              this.$id = "ace/mode/macrosia";
+          }).call(Mode.prototype);
 
-            exports.Mode = Mode;
-            out.value = "";
+          exports.Mode = Mode;
         });
 
         editor = ace.edit("editor");
@@ -241,7 +352,6 @@
           fontSize: "16px",
         });
 
-        const button = document.getElementById("run");
         button.addEventListener('mousedown', () => {
           if (!wasmInitialized || !editor) {
             out.value = "Macrosia not initialized yet, wait a second.";
@@ -265,7 +375,6 @@
             running = false;
           });
         });
-      });
     </script>
   </body>
 </html>
