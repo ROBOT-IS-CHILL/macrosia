@@ -360,10 +360,11 @@ def_macro! {
     /// Returns a single UTF-8 character from a given integer value.
     /// # Arguments
     /// 1. The codepoint of the character to return.
-    pub macro Char [b"chr"] (hex) + _x, _v, _r {
-        str::from_utf8(hex).ok()
-            .and_then(|s| s.parse::<u32>().ok().and_then(char::from_u32))
-            .ok_or("not an integer, or invalid character codepoint".into())
+    pub macro Char [b"chr"] (val) + _x, _v, _r {
+        let v = Number::try_from(val)?;
+        u32::try_from(i64::from(v)).ok()
+            .and_then(char::from_u32)
+            .ok_or("invalid character codepoint".into())
             .map(|chr| {
                 let mut v = vec![0; chr.len_utf8()];
                 chr.encode_utf8(&mut v);
