@@ -14,6 +14,7 @@ rand = {version = "0.9", default-features = false, features = ["std", "small_rng
 base64 = "0.22"
 web-time = {version = "1"}
 getrandom = { version = "0.3.3", features = ["wasm_js"], optional = true }
+flate2 = { version = "1.0.17", features = ["zlib-rs"], default-features = false }
 
 [features]
 default = []

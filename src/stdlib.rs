@@ -3,10 +3,12 @@
 use crate::{Macro, MacroError, Number, var_reg::VariableRegistry};
 use base64::Engine;
 use const_format::concatcp;
+use flate2::{Compression, write::ZlibEncoder, read::ZlibDecoder};
 use itertools::Itertools as _;
 use rand::Rng;
 use rand::SeedableRng;
 use regex::Regex;
+use std::io::prelude::*;
 use std::{
     borrow::Cow,
     cmp::Ordering,
@@ -608,10 +610,10 @@ def_macro! {
 
     /// Repeats a string a set amount times, replacing a pattern in each
     /// with a number on a range, optionally separated by a separator.
-    /// The pattern must be a single character, and the pattern, repeated string, and separator all must be valid UTF-8.
+    /// The pattern, repeated string, and separator all must be valid UTF-8.
     ///
     /// # Arguments
-    /// 1. The pattern to replace in the repeated stirng
+    /// 1. The pattern to replace in the repeated string
     /// 2. The start of the range to repeat on
     /// 3. The end of the range to repeat on
     /// 4. The string to repeat
@@ -640,6 +642,47 @@ def_macro! {
                 buf.push_str(joiner);
             }
         }
+        Ok(Cow::Owned(buf.into_bytes()))
+    }
+
+    /// Repeats a string for each element in a list, replacing one pattern in each
+    /// with the list index and another with the value, optionally separated by a separator.
+    /// The string, patterns, and list all must be valid UTF-8.
+    ///
+    /// # Arguments
+    /// 1. The list to loop over
+    /// 2. The list delimiter
+    /// 3. The pattern to replace with the index
+    /// 4. The pattern to repace with the value
+    /// 5? The separator between repetitions
+    ///
+    /// # Example
+    /// > `[for/a,b,c/,/#/@/#:@/,]` -> `0:a,1:b,2:c`
+    pub macro For [b"for"] (list, delim, idx_pat, item_pat, string, ...iter) + _x, _v, _r {
+        let list = str::from_utf8(list)?;
+        let idx_pat = str::from_utf8(idx_pat)?;
+        let item_pat = str::from_utf8(item_pat)?;
+        let string = str::from_utf8(string)?;
+        let joiner = str::from_utf8(iter.next().unwrap_or(b""))?;
+        let mut buf = String::new();
+        let mut array = list;
+        let mut list_idx = 0;
+        while let Some(idx) = array.as_bytes().windows(delim.len()).position(|w| w == delim) {
+            let repl_string = string
+                .replace(idx_pat, &format!("{list_idx}"))
+                .replace(item_pat, &array[..idx]);
+            buf.try_reserve(repl_string.len())?;
+            buf.push_str(&repl_string);
+            buf.try_reserve(joiner.len())?;
+            buf.push_str(&joiner);
+            array = &array[idx + delim.len()..];
+            list_idx = list_idx + 1;
+        }
+        let repl_string = string
+            .replace(idx_pat, &format!("{list_idx}"))
+            .replace(item_pat, &array);
+        buf.try_reserve(repl_string.len())?;
+        buf.push_str(&repl_string);
         Ok(Cow::Owned(buf.into_bytes()))
     }
 
@@ -729,7 +772,7 @@ def_macro! {
         let engine = base64::engine::general_purpose::STANDARD;
         let joined = val.intersperse(b"/").flatten().copied().collect::<Vec<_>>();
         let mut buf = Vec::new();
-        buf.try_reserve(base64::encoded_len(joined.len(), false).ok_or("base64 value is way too large")?)?;
+        buf.try_reserve(base64::encoded_len(joined.len(), true).ok_or("base64 value is way too large")?)?;
         unsafe {
             let sbuf = buf.spare_capacity_mut();
             std::ptr::write_bytes(sbuf.as_mut_ptr(), 0, sbuf.len());
@@ -973,6 +1016,80 @@ def_macro! {
         if let Some(idx) = haystack.windows(needle.len()).position(|w| w == needle) {
             Ok(Cow::Owned(format!("{idx}").into_bytes()))
         } else { Ok(Cow::Borrowed(b"-1")) }
+    }
+
+    /// Compresses a given string using zlib, returning the compressed data Base64-encoded.
+    /// # Arguments
+    /// 1... The string to compress. Slashes do not need to be escaped.
+    pub macro ZlibCompress [b"zlib.compress"] (...iter) + _x, _v, _r {
+        let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
+        for arg in iter.intersperse(b"/") {
+            e.write_all(arg).map_err(|e| format!("writing to zlib stream failed: {e}"))?
+        }
+        let bytes = e.finish().map_err(|e| format!("failed to compress: {e}"))?;
+        let engine = base64::engine::general_purpose::STANDARD;
+        let mut buf = Vec::new();
+        buf.try_reserve(base64::encoded_len(bytes.len(), true).ok_or("base64 value is way too large")?)?;
+        unsafe {
+            let sbuf = buf.spare_capacity_mut();
+            std::ptr::write_bytes(sbuf.as_mut_ptr(), 0, sbuf.len());
+            let len = sbuf.len();
+            buf.set_len(len);
+        }
+        let written = engine.encode_slice(bytes, &mut buf).map_err(|e| format!("failed to encode base64: {e}"))?;
+        buf.truncate(written);
+        Ok(Cow::Owned(buf))
+    }
+
+    /// Decompresses a given string using zlib, first decoding it from Base64.
+    /// # Arguments
+    /// 1. The string to decompress. Must be valid Base64.
+    pub macro ZlibDecompress [b"zlib.decompress"] (string) + _x, _v, _r {
+        let engine = base64::engine::general_purpose::STANDARD;
+        let mut buf = Vec::new();
+        buf.try_reserve(base64::decoded_len_estimate(string.len()))?;
+        unsafe {
+            let sbuf = buf.spare_capacity_mut();
+            std::ptr::write_bytes(sbuf.as_mut_ptr(), 0, sbuf.len());
+            let len = sbuf.len();
+            buf.set_len(len);
+        }
+        let written_len = engine.decode_slice(string, &mut buf).map_err(|_| "failed to decode base64")?;
+        buf.truncate(written_len);
+        let mut e = ZlibDecoder::new(&*buf);
+        let mut vec = Vec::new();
+        e.read_to_end(&mut vec).map_err(|e| format!("failed to decompress data: {e}"))?;
+        Ok(Cow::Owned(vec))
+    }
+
+    /// Sets a single byte of a variable to a hexadecimal value.
+    /// # Arguments
+    /// 1. The variable to index into.
+    /// 2. The byte index in the variable. Must be greater than or equal to 0.
+    /// 3. The value to set the byte to.
+    pub macro ByteSet [b"byteset"] (name, index, value) + _x, v, _r {
+        let buf = v.load_mut(&*name)
+            .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
+        let index = Number::try_from(index).map(i64::from)?;
+        let index = usize::try_from(index).map_err(|_| "invalid index")?;
+        let byte = buf.get_mut(index).ok_or("index out of bounds")?;
+        *byte = str::from_utf8(value).ok()
+            .and_then(|s| u8::from_str_radix(s, 16).ok())
+            .ok_or("invalid byte")?;
+        Ok(Cow::Borrowed(b""))
+    }
+
+    /// Gets a single byte of a variable as a hexadecimal value.
+    /// # Arguments
+    /// 1. The variable to index into.
+    /// 2. The byte index in the variable. Must be greater than or equal to 0.
+    pub macro ByteGet [b"byteget"] (name, index) + _x, v, _r {
+        let buf = v.load(&*name)
+            .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
+        let index = Number::try_from(index).map(i64::from)?;
+        let index = usize::try_from(index).map_err(|_| "invalid index")?;
+        let byte = buf.get(index).ok_or("index out of bounds")?;
+        Ok(Cow::Borrowed(std::slice::from_ref(&BYTES[*byte as usize])))
     }
 }
 
