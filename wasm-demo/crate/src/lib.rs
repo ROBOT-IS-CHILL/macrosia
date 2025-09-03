@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+use itertools::Itertools;
 use std::sync::OnceLock;
 use macrosia::*;
 use std::{
@@ -10,12 +12,25 @@ use std::{
     task::{Context, Poll},
 };
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::js_sys::{Array, Promise, Reflect};
+use wasm_bindgen_futures::js_sys::{Array, Promise, Object};
 
 #[wasm_bindgen]
 extern "C" {
     pub fn getTiles() -> JsValue;
     pub fn setTimeout(callback: JsValue, timeout_ms: u32);
+}
+
+fn get_tiles() -> Result<HashMap<String, TileData>, JsValue> {
+    Ok(serde_wasm_bindgen::from_value(getTiles())?)
+}
+
+#[derive(serde::Deserialize, Clone)]
+struct TileData {
+    active_color: [f64; 2],
+    inactive_color: [f64; 2],
+    sprite: [String; 2],
+    tags: HashSet<String>,
+    tiling: String
 }
 
 static BASE_EXECUTOR: OnceLock<Executor> = OnceLock::new();
@@ -72,18 +87,43 @@ static KILL_MACROS: AtomicBool = AtomicBool::new(false);
 struct TilesMacro;
 
 impl Macro for TilesMacro {
-    fn name(&self) -> Cow<'static, [u8]> { Cow::Borrowed(b"tiles") }
+    fn name(&self) -> &[u8] { b"tiles" }
     fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(
         &self,
         _x: &'exec macrosia::Executor,
         _v: &'reg mut VariableRegistry,
         _r: &mut macrosia::rand::rngs::SmallRng,
-        _args: &mut dyn Iterator<Item = &'arg [u8]>
+        args: &mut dyn Iterator<Item = &'arg [u8]>
     ) -> Result<Cow<'static, [u8]>, MacroError> {
-        Err("TODO: this is gonna be a nightmare to implement but i will do it. trust me.")?;
-        unreachable!()
+        let queries = args
+            .map(str::from_utf8)
+            .process_results(|iter| iter
+                .map(|v| {
+                    let Some((query, value)) = v.split_once(':') else { return Err(format!("invalid query: {v}")) };
+                    if !matches!(query, "name" | "tiling" | "source" | "tag") {
+                        return Err(format!("invalid query: {v}"));
+                    }
+                    Ok((query, value))
+                }).collect::<Vec<_>>()
+            )?;
+        static TILES: OnceLock<HashMap<String, TileData>> = OnceLock::new();
+        let mut tiles =
+            TILES.get_or_init(|| get_tiles().expect("failed to get tile data"))
+            .clone();
+        for query_res in queries {
+            let (query, value) = query_res?;
+            match query {
+                "name" => tiles.retain(|k, _| k.contains(value)),
+                "tiling" => tiles.retain(|_, v| v.tiling == value),
+                "source" => tiles.retain(|_, v| v.sprite[0] == value),
+                "tag" => tiles.retain(|_, v| v.tags.contains(value)),
+                _ => {}
+            }
+        }
+        Ok(Cow::Owned(tiles.keys().sorted().join("/").into_bytes()))
     }
     fn clone(&self) -> Box<dyn macrosia::Macro> { Box::new(Self) }
+    fn description(&self) -> &str { "" }
 }
 
 #[wasm_bindgen]
@@ -92,24 +132,22 @@ pub fn cancel_running_macro() {
 }
 
 #[wasm_bindgen]
-pub fn initialize_executor(database_macros: Array) {
+pub fn initialize_executor(database_macros: Object) {
     console_error_panic_hook::set_once();
     BASE_EXECUTOR.get_or_init(|| {
-        let name_jskey = JsValue::from_str("name");
-        let value_jskey = JsValue::from_str("value");
         let mut exec = Executor::new(b'x');
-        for entry in database_macros {
-            let name: String = Reflect::get(&entry, &name_jskey)
-                .expect("database macro did not have name field")
+        for entry in Object::entries(&database_macros) {
+            let entry = Array::from(&entry);
+            let name: String = entry.get(0)
                 .as_string()
                 .expect("database macro name was not string");
-            let value: String = Reflect::get(&entry, &value_jskey)
-                .expect("database macro did not have name field")
+            let value: String = entry.get(1)
                 .as_string()
                 .expect("database macro value was not string");
             exec.add_macro(TextMacro {
                 name: Arc::new(name.into_bytes()),
                 source: Arc::new(value.into_bytes()),
+                description: Arc::new(String::new())
             })
         }
 
@@ -140,6 +178,7 @@ pub unsafe fn evaluate(mac: String) -> Promise {
                 exec.add_macro(TextMacro {
                     name: Arc::new(String::from(name).into_bytes()),
                     source: Arc::new(String::from(source).into_bytes()),
+                    description: Arc::new(String::new())
                 });
                 return false;
             }

@@ -953,6 +953,26 @@ def_macro! {
         }
         Ok(Cow::Owned(format!("{count}").into_bytes()))
     }
+
+    /// Finds the first occurrence of a string within another, optionally between a given range.
+    /// Returns -1 if not found.
+    /// # Arguments
+    /// 1. The value to search.
+    /// 2. The value to search for.
+    /// 3? The start index. Defaults to 0.
+    /// 4? The end index. Defaults to the length of the string.
+    pub macro Find [b"find"] (haystack, needle, ...iter) + _x, _v, _r {
+        let mut start = iter.next().map(Number::try_from).transpose()?.map(i64::from).unwrap_or(0);
+        let end = iter.next().map(Number::try_from).transpose()?.map(i64::from).unwrap_or(haystack.len() as i64);
+        if start < 0 { start += haystack.len() as i64 }
+        if start < 0 { return Err("search start cannot be before string start")? }
+        if end > haystack.len() as i64 { return Err("search end cannot be larger than string")? };
+        let haystack = haystack.get(start as usize .. end as usize).ok_or("haystack slice failed")?;
+        if needle.len() > haystack.len() { return Ok(Cow::Borrowed(b"0")) }
+        if let Some(idx) = haystack.windows(needle.len()).position(|w| w == needle) {
+            Ok(Cow::Owned(format!("{idx}").into_bytes()))
+        } else { Ok(Cow::Borrowed(b"-1")) }
+    }
 }
 
 /// Static block of bytes that can be used to turn a `u8` into a `&'static u8`.

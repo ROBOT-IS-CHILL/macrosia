@@ -221,34 +221,36 @@ Rust builtins:
 
       wasmInitialized = true;
 
-      let db_macro_names = [];
-      let tiles = [];
+      let db_macros = {};
+      let tiles = {};
       let dbFailed = false;
 
+      let db_macro_names = []
+
       try {
-        let res = await fetch('https://ric-api.sno.mba/macros.json?data_only=true&cba', {
+        let res = await fetch('https://ric-api.sno.mba/macros.json?data_only=true', {
           mode: 'cors'
         });
-        let data = await res.json();
-        for (let {"name": name} of data) {
-          db_macro_names.push(RegExp.escape(name));
+        let db_macros = await res.json();
+        for (let [name, _] of Object.entries(db_macros)) {
+          db_macro_names.push(RegExp.escape(name))
         }
-        initialize_executor(data);
+        initialize_executor(db_macros);
         button.disabled = false;
         out.value = "";
         res = await fetch('https://ric-api.sno.mba/tiles.json', {
           mode: 'cors'
         });
-        data = await res.json();
+        let data = await res.json();
         tiles = data;
       } catch (err) {
         dbFailed = true;
-        initialize_executor([]);
+        initialize_executor({});
         button.disabled = false;
         out.value = `Failed to get macros from RIC database!\nYou can still use builtins, but you'll have to refresh to try to get them again.\nThe [tiles] macro will also be non-functional.\nError: ${err}`;
       }
 
-      function getTiles() {
+      window.getTiles = function() {
         return tiles;
       }
 
