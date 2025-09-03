@@ -211,6 +211,13 @@ Rust builtins:
     </div>
     <script type="module">
       import init, { evaluate, get_stdlib_macro_names, initialize_executor, cancel_running_macro } from "./pkg/glue.js";
+
+     if (!RegExp.escape) {
+      RegExp.escape = (str) => {
+        return str.replace(/[\\^$.*+?()[\]{}|\\-]/g, "\\$&")
+      };
+    }
+
       const out = document.getElementById("output"); // global
       const button = document.getElementById("run");
       var wasmInitialized = false; // global
