@@ -12,7 +12,7 @@ use std::{
     task::{Context, Poll},
 };
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::js_sys::{Array, Promise, Object};
+use wasm_bindgen_futures::js_sys::{Array, Promise, Object, Reflect};
 
 #[wasm_bindgen]
 extern "C" {
@@ -25,6 +25,7 @@ fn get_tiles() -> Result<HashMap<String, TileData>, JsValue> {
 }
 
 #[derive(serde::Deserialize, Clone)]
+#[allow(dead_code)]
 struct TileData {
     active_color: [f64; 2],
     inactive_color: [f64; 2],
@@ -113,7 +114,10 @@ impl Macro for TilesMacro {
         for query_res in queries {
             let (query, value) = query_res?;
             match query {
-                "name" => tiles.retain(|k, _| k.contains(value)),
+                "name" => {
+                    let regex = regex::Regex::new(value).map_err(|err| format!("invalid regex {value}: {err}"))?;
+                    tiles.retain(|k, _| regex.is_match(k) )
+                },
                 "tiling" => tiles.retain(|_, v| v.tiling == value),
                 "source" => tiles.retain(|_, v| v.sprite[0] == value),
                 "tag" => tiles.retain(|_, v| v.tags.contains(value)),
@@ -141,13 +145,19 @@ pub fn initialize_executor(database_macros: Object) {
             let name: String = entry.get(0)
                 .as_string()
                 .expect("database macro name was not string");
-            let value: String = entry.get(1)
+            let data: Object = entry.get(1).into();
+            let value: String = Reflect::get(&data, &JsValue::from_str("value"))
+                .expect("value field did not exist on database macro")
                 .as_string()
                 .expect("database macro value was not string");
+            let description: String = Reflect::get(&data, &JsValue::from_str("description"))
+                .expect("description field did not exist on database macro")
+                .as_string()
+                .expect("database macro description was not string");
             exec.add_macro(TextMacro {
                 name: Arc::new(name.into_bytes()),
                 source: Arc::new(value.into_bytes()),
-                description: Arc::new(String::new())
+                description: Arc::new(description)
             })
         }
 
@@ -203,8 +213,10 @@ pub unsafe fn evaluate(mac: String) -> Promise {
 #[wasm_bindgen]
 pub fn get_stdlib_macro_names() -> Vec<String> {
     let exec: Executor = Executor::new(0).with_stdlib();
-    exec.macros()
-        .keys()
-        .map(|v| String::from_utf8_lossy(&*v).into_owned())
+    exec.macros().iter()
+        .map(|(v, m)| format!("{}\n{}",
+            String::from_utf8_lossy(&*v).into_owned(),
+            m.description()
+        ))
         .collect()
 }

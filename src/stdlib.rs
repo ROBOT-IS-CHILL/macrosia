@@ -161,6 +161,7 @@ fn is_truthy(value: &[u8]) -> bool {
 
 def_macro! {
     /// Discards all arguments, returning nothing.
+    /// Will still run any macros within its arguments - this one isn't "special".
     pub macro Discard [b""] (... _args) + _x, _v, _r {
         return Ok(Cow::Borrowed(b""))
     }
@@ -1089,7 +1090,7 @@ def_macro! {
         let index = Number::try_from(index).map(i64::from)?;
         let index = usize::try_from(index).map_err(|_| "invalid index")?;
         let byte = buf.get(index).ok_or("index out of bounds")?;
-        Ok(Cow::Borrowed(std::slice::from_ref(&BYTES[*byte as usize])))
+        Ok(Cow::Owned(format!("{byte:02x}").into_bytes()))
     }
 }
 

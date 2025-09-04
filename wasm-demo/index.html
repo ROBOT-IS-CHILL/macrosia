@@ -117,90 +117,40 @@
   <body>
     <div class="vsplit">
       <div class="split">
-        <div id="editor">#define infinite_loop [infinite_loop]
-[infinite_loop]
+        <div id="editor">How to define macros:
 
-[mazegen.textdisplay/10/10] <- Macros are synced to the database in this demo!
+#define foo [bar/$1]
+#define bar $1 + $1 = [add/$1/$1]
+[foo/1]
 
-Note that this isn't a flat speedup across the board - some macros will take
-around the same amount of time here. Pay attention to their time complexity and constant factor -
-for example, mazegen.textdisplay is very slow no matter the implementation,
-due to it having a time complexity of O(w*h) with a very large constant factor,
-estimated to be around 1100 expansion steps per square unit.
+Changes:
 
-Bot builtins: (orange ones are currently unimplemented)
-
-[add]
-[and]
-[argslice]
-[assert]
-[base64.decode]
-[base64.encode]
-[bin]
-[byteget]
-[byteset]
-[bytesplice]
-[chr]
-[concat]
-[count]
-[divide]
-[drop]
-[equal]
-[error]
-[find]
-[for]
-[get]
-[hash]
-[hex]
-[if]
-[imag]
-[int]
-[is_number]
-[is_stored]
-[join]
-[json.append]
-[json.get]
-[json.insert]
-[json.keys]
-[json.len]
-[json.remove]
-[json.set]
-[len]
-[less]
-[load]
-[log]
-[lower]
 [macro] <- returns a boolean instead
-[mod]
-[multiply]
-[not]
-[oct]
-[or]
-[ord]
-[pow]
-[rand]
-[real]
-[repeat]
-[replace]
-[sequence]
-[slice]
-[split]
-[store]
-[subtract]
-[tiles]
-[title]
-[to_boolean]
-[to_float]
-[try] <- will not be implemented due to it being incompatible with the interruptible execution system
-[unescape]
-[unixtime] <- ymmv on the precision due to js security features
-[upper]
-[ureplace]
-[variables] <- nobody is using this so i'm not keeping it lol
-[zlib.compress]
-[zlib.decompress]
+[unixtime] <- ymmv on the precision due to js security features, otherwise unchanged
+[replace] <- uses rust regex, which doesn't support lookaheads or backreferences (all macros that use regex have this change)
 
-Rust builtins:
+Not implemented:
+
+[try] <- will not be implemented due to it being incompatible with the interruptible execution system
+[variables] <- nobody is using this so i'm not keeping it lol
+[bytesplice] <- not really that much more useful than byteset
+[json.*] <- nobody was using any of these macros
+
+Builtins:
+[tiles]
+ Performs a search on the tile database, and returns the names of all tiles that match, separated by `/`.
+
+ The arguments are expected to be an arbitrarily long list of search queries.
+
+ Valid search queries are:
+
+ - `name:&lt;pattern&gt;` Fully matches the tile name using a regex pattern (e.g. `baba` will match baba only, but `baba.*` will match all tiles starting with baba)
+ - `tiling:&lt;tiling mode&gt;` Matches the tiling mode
+ - `source:&lt;string&gt;` Matches the source the tile came from
+ - `tag:&lt;string&gt;` Matches if the tile has this tag
+
+ # Arguments
+ 1... The search queries
 </div>
         <textarea readonly disabled id="output"></textarea>
       </div>
@@ -232,15 +182,15 @@ Rust builtins:
       let tiles = {};
       let dbFailed = false;
 
-      let db_macro_names = []
+      let db_macro_regexes = []
 
       try {
-        let res = await fetch('https://ric-api.sno.mba/macros.json?data_only=true', {
+        let res = await fetch('https://ric-api.sno.mba/macros.json', {
           mode: 'cors'
         });
         let db_macros = await res.json();
         for (let [name, _] of Object.entries(db_macros)) {
-          db_macro_names.push(RegExp.escape(name))
+          db_macro_regexes.push(RegExp.escape(name))
         }
         initialize_executor(db_macros);
         button.disabled = false;
@@ -261,9 +211,13 @@ Rust builtins:
         return tiles;
       }
 
-      let std_macro_names = [];
-      for (let name of get_stdlib_macro_names()) {
-        std_macro_names.push(RegExp.escape(name));
+      let std_macros = {}
+      let std_macro_regexes = [];
+      for (let name_desc of get_stdlib_macro_names()) {
+        let lines = name_desc.split(/\n/);
+        let [name, desc] = [lines.shift(), lines.join("\n")];
+        std_macros[name] = desc;
+        std_macro_regexes.push(RegExp.escape(name))
       }
 
       ace.define('ace/mode/macrosia', ['require', 'exports', 'module'],
@@ -311,11 +265,11 @@ Rust builtins:
                       },
                       {
                         token: "std_macro",
-                        regex: `(?<=\\[)(?:tiles|${std_macro_names.join("|")})(?=[\\/\\]])`
+                        regex: `(?<=\\[)(?:tiles|${std_macro_regexes.join("|")})(?=[\\/\\]])`
                       },
                       {
                         token: "db_macro",
-                        regex: `(?<=\\[)(?:${db_macro_names.join("|")})(?=[\\/\\]])`
+                        regex: `(?<=\\[)(?:${db_macro_regexes.join("|")})(?=[\\/\\]])`
                       },
                       {
                         token: "variable.language",
@@ -381,8 +335,8 @@ Rust builtins:
           fontSize: "16px",
         });
 
-        for (let name of get_stdlib_macro_names().sort()) {
-          editor.setValue(editor.getValue() + `\n[${name}]`, -1);
+        for (let [name, desc] of Object.entries(std_macros).sort(([a, _a], [b, _b]) => {return a == b ? 0 : (a < b ? -1 : 1);})) {
+          editor.setValue(editor.getValue() + `\n[${name}]:\n${desc}`, -1);
         }
 
         button.addEventListener('mousedown', () => {

@@ -1,4 +1,21 @@
-use std::{borrow::Cow, collections::BTreeMap};
+use std::{borrow::Cow, collections::HashMap, hash::{BuildHasher, Hasher}};
+
+#[repr(transparent)]
+struct IdentityHash(u64);
+impl BuildHasher for IdentityHash {
+    type Hasher = Self;
+    fn build_hasher(&self) -> Self::Hasher {
+        Self(0)
+    }
+}
+impl Hasher for IdentityHash {
+    fn write(&mut self, bytes: &[u8]) {
+        let buf = unsafe { std::mem::transmute::<&mut u64, &mut [u8; 8]>(&mut self.0) };
+        buf[..bytes.len().min(8)].copy_from_slice(bytes);
+    }
+    fn write_u64(&mut self, i: u64) { self.0 = i; }
+    fn finish(&self) -> u64 { self.0 }
+}
 
 /// A registry to store variables in during macro execution.
 pub struct VariableRegistry {
@@ -7,14 +24,14 @@ pub struct VariableRegistry {
     // keep the name borrowed or clone it, which just won't work.
     // Also, considering how ephemeral and sandboxed variables are,
     // it doesn't really matter :shrug:
-    vars: BTreeMap<u64, Vec<u8>>,
+    vars: HashMap<u64, Vec<u8>, IdentityHash>,
 }
 
 impl VariableRegistry {
     /// Creates a new variable registry.
     pub const fn new() -> Self {
         Self {
-            vars: BTreeMap::new(),
+            vars: HashMap::with_hasher(IdentityHash(0)),
         }
     }
 

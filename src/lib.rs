@@ -13,6 +13,7 @@ mod text_macro;
 mod var_reg;
 
 pub use rand;
+pub use regex;
 
 pub use exec::Executor;
 pub use macro_trait::{Macro, MacroError};
