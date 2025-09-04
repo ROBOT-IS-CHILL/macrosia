@@ -336,6 +336,7 @@ Builtins:
         editor.setOptions({
           fontFamily: "JetBrains Mono",
           fontSize: "16px",
+          wrap: true
         });
 
         for (let [name, desc] of Object.entries(std_macros).sort(([a, _a], [b, _b]) => {return a == b ? 0 : (a < b ? -1 : 1);})) {
