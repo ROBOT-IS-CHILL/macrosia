@@ -1095,7 +1095,7 @@ def_macro! {
 
     /// Splices a string of hexadecimal bytes into a variable.
     /// # Arguments
-    /// 1. The variable to splite.
+    /// 1. The variable to splice.
     /// 2. The hexadecimal string splice into the byte.
     /// 3. The byte index to start in the variable. Must be greater than or equal to 0.
     /// 4? The byte index to end in the variable. Must be greater than or equal to 0. Defaults to the end of the string.
