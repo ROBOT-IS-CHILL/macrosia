@@ -411,7 +411,7 @@ Builtins:
         const deflated = pako.deflate(value);
         const url = btoa(String.fromCharCode.apply(null, deflated)).replace("+", "-").replace("/", "_");
         window.location.hash = url;
-        navigator.clipboard.writeText(window.href)
+        navigator.clipboard.writeText(window.location.href);
         shareButton.textContent = "Copied!";
         setTimeout(() => {shareButton.textContent = "Share"}, 1800);
       });
