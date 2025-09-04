@@ -5,6 +5,7 @@
     <title>Macrosia Web Demo</title>
     <link rel="icon" type="image/x-icon" href="https://balt.sno.mba/macroscript/favicon.ico">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.43.2/ace.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap');
       div.split {
@@ -31,16 +32,18 @@
         cursor: text;
         padding: 6pt;
       }
-      button#run {
+      button {
         border: none;
         font-family: "JetBrains Mono";
         font-size: 16pt;
-        background-color: #ffffff20;
-        color: #ffffff;
         margin: 6pt 12pt;
         border-radius: 6pt;
         cursor: pointer;
         transition: background-color 0.05s ease-in-out;
+      }
+      button#run {
+        background-color: #ffffff20;
+        color: #ffffff;
       }
       button#run:hover {
         background-color: #ffffff40;
@@ -56,6 +59,16 @@
       }
       button#run.stop:active {
         background-color: #ff2020;
+      }
+      button#share {
+        background-color: #20ffff20;
+        color: #ffffff;
+      }
+      button#share:hover {
+        background-color: #20ffff40;
+      }
+      button#share:active {
+        background-color: #20ffff10;
       }
       body {
         background-color: #000000;
@@ -159,7 +172,10 @@ Builtins:
       </div>
       <div class="split">
         <button id="run" disabled>Run</button>
-        <a class="doclink" href="./doc/index.html">Documentation</a>
+        <div class="split">
+          <a class="doclink" href="./doc/index.html">Documentation</a>
+          <button id="share" disabled>Share</button>
+        </div>
       </div>
     </div>
     <script type="module">
@@ -173,6 +189,7 @@ Builtins:
 
       const out = document.getElementById("output"); // global
       const button = document.getElementById("run");
+      const shareButton = document.getElementById("share");
       var wasmInitialized = false; // global
       var editor; // global
       out.value = "Getting database macros...";
@@ -339,9 +356,30 @@ Builtins:
           wrap: true
         });
 
-        for (let [name, desc] of Object.entries(std_macros).sort(([a, _a], [b, _b]) => {return a == b ? 0 : (a < b ? -1 : 1);})) {
-          editor.setValue(editor.getValue() + `\n[${name}]:\n${desc}`, -1);
+        if (window.location.hash) {
+          try {
+            let encoded = window.location.hash.slice(1);
+            let compressed = atob(encoded.replace("_", "/").replace("-", "+"));
+
+            const len = compressed.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = compressed.charCodeAt(i);
+            }
+            const data = pako.inflate(bytes);
+            const textData = String.fromCharCode.apply(null, data);
+            editor.setValue(textData, -1);
+          } catch (e) {
+            editor.setValue(`Failed to decode share URL: ${e}`, -1);
+          }
+        } else {
+          for (let [name, desc] of Object.entries(std_macros).sort(([a, _a], [b, _b]) => {return a == b ? 0 : (a < b ? -1 : 1);})) {
+            editor.setValue(editor.getValue() + `\n[${name}]:\n${desc}`, -1);
+          }
         }
+
+        shareButton.disabled = false;
+
 
         button.addEventListener('mousedown', () => {
           if (!wasmInitialized || !editor) {
@@ -366,6 +404,17 @@ Builtins:
             running = false;
           });
         });
+
+      shareButton.addEventListener('mousedown', () => {
+        if (!editor) { return }
+        const value = editor.getValue();
+        const deflated = pako.deflate(value);
+        const url = btoa(String.fromCharCode.apply(null, deflated)).replace("+", "-").replace("/", "_");
+        window.location.hash = url;
+        navigator.clipboard.writeText(window.href)
+        shareButton.textContent = "Copied!";
+        setTimeout(() => {shareButton.textContent = "Share"}, 1800);
+      });
     </script>
   </body>
 </html>
