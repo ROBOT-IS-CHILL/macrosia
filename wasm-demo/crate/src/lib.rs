@@ -124,7 +124,12 @@ impl Macro for TilesMacro {
                 _ => {}
             }
         }
-        Ok(Cow::Owned(tiles.keys().sorted().join("/").into_bytes()))
+        Ok(Cow::Owned(tiles.keys().sorted().map(|tilename| {
+            tilename.replace("\\", "\\\\")
+                    .replace("[", "\\[").replace("/", "\\/")
+                    .replace("]", "\\]").replace(" ", "\\ ")
+                    .replace("$", "\\$")
+        }).join("/").into_bytes()))
     }
     fn clone(&self) -> Box<dyn macrosia::Macro> { Box::new(Self) }
     fn description(&self) -> &str { "" }

@@ -751,7 +751,7 @@ def_macro! {
     /// # Arguments
     /// 1... The Base64 string to decode.
     pub macro Base64Decode [b"base64.decode"] (...val) + _x, _v, _r {
-        let engine = base64::engine::general_purpose::STANDARD;
+        let engine = base64::engine::general_purpose::URL_SAFE;
         let joined = val.intersperse(b"/").flatten().copied().collect::<Vec<_>>();
         let mut buf = Vec::new();
         buf.try_reserve(base64::decoded_len_estimate(joined.len()))?;
@@ -770,7 +770,7 @@ def_macro! {
     /// # Arguments
     /// 1... The string to encode.
     pub macro Base64Encode [b"base64.encode"] (...val) + _x, _v, _r {
-        let engine = base64::engine::general_purpose::STANDARD;
+        let engine = base64::engine::general_purpose::URL_SAFE;
         let joined = val.intersperse(b"/").flatten().copied().collect::<Vec<_>>();
         let mut buf = Vec::new();
         buf.try_reserve(base64::encoded_len(joined.len(), true).ok_or("base64 value is way too large")?)?;
@@ -1028,7 +1028,7 @@ def_macro! {
             e.write_all(arg).map_err(|e| format!("writing to zlib stream failed: {e}"))?
         }
         let bytes = e.finish().map_err(|e| format!("failed to compress: {e}"))?;
-        let engine = base64::engine::general_purpose::STANDARD;
+        let engine = base64::engine::general_purpose::URL_SAFE;
         let mut buf = Vec::new();
         buf.try_reserve(base64::encoded_len(bytes.len(), true).ok_or("base64 value is way too large")?)?;
         unsafe {
@@ -1046,7 +1046,7 @@ def_macro! {
     /// # Arguments
     /// 1. The string to decompress. Must be valid Base64.
     pub macro ZlibDecompress [b"zlib.decompress"] (string) + _x, _v, _r {
-        let engine = base64::engine::general_purpose::STANDARD;
+        let engine = base64::engine::general_purpose::URL_SAFE;
         let mut buf = Vec::new();
         buf.try_reserve(base64::decoded_len_estimate(string.len()))?;
         unsafe {
@@ -1091,6 +1091,36 @@ def_macro! {
         let index = usize::try_from(index).map_err(|_| "invalid index")?;
         let byte = buf.get(index).ok_or("index out of bounds")?;
         Ok(Cow::Owned(format!("{byte:02x}").into_bytes()))
+    }
+
+    /// Splices a string of hexadecimal bytes into a variable.
+    /// # Arguments
+    /// 1. The variable to splite.
+    /// 2. The hexadecimal string splice into the byte.
+    /// 3. The byte index to start in the variable. Must be greater than or equal to 0.
+    /// 4? The byte index to end in the variable. Must be greater than or equal to 0. Defaults to the end of the string.
+    pub macro ByteSplice [b"bytesplice"] (name, value, start, ...iter) + _x, v, _r {
+        let buf = v.load_mut(&*name)
+            .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
+
+        if value.len() % 2 != 0 { return Err("hexstring length must be even")? }
+
+        let start = usize::try_from(Number::try_from(start).map(i64::from)?).map_err(|_| "invalid index")?;
+        let end = match iter.next() {
+            Some(end) => usize::try_from(Number::try_from(end).map(i64::from)?).map_err(|_| "invalid index")?,
+            None => buf.len()
+        };
+
+        let prefix = buf.get(..start).ok_or("start index out of bounds")?;
+        let suffix = buf.get(end..).ok_or("end index out of bounds")?;
+        let mut buf = Vec::from(prefix);
+        buf.try_reserve(value.len() / 2 + suffix.len())?;
+        for hex in value.chunks(2) {
+            let byte_str = str::from_utf8(hex)?;
+            buf.push(u8::from_str_radix(byte_str, 16).map_err(|_| format!("invalid byte: {byte_str}"))?);
+        }
+        buf.extend(suffix);
+        Ok(Cow::Borrowed(b""))
     }
 }
 

@@ -128,6 +128,10 @@ Changes:
 [macro] <- returns a boolean instead
 [unixtime] <- ymmv on the precision due to js security features, otherwise unchanged
 [replace] <- uses rust regex, which doesn't support lookaheads or backreferences (all macros that use regex have this change)
+[base64.encode] <- uses url-safe base64
+[base64.decode] ^
+[zlib.compress] ^
+[zlib.decompress] ^
 
 Not implemented:
 
