@@ -638,7 +638,7 @@ def_macro! {
             h = h.replace(needle, &format!("{i}"));
             buf.try_reserve(h.len())?;
             buf.push_str(&h);
-            if i.checked_add(1).is_some_and(|i| i != end) {
+            if i.checked_add(1).is_some_and(|i| i <= end) {
                 buf.try_reserve(joiner.len())?;
                 buf.push_str(joiner);
             }
