@@ -625,25 +625,23 @@ def_macro! {
     /// > `[sequence/@/1/3/@]` -> `123`
     pub macro Sequence [b"sequence"] (needle, start, end, haystack, ...iter) + _x, _v, _r {
         let joiner = str::from_utf8(iter.next().unwrap_or(b""))?;
-        let start = Number::try_from(start).map(|v| i64::from(v))?;
-        let end = Number::try_from(end).map(|v| i64::from(v))?;
-        if end <= start { return Ok(Cow::Borrowed(b"")) };
+        let mut start = Number::try_from(start).map(|v| i64::from(v))?;
+        let mut end = Number::try_from(end).map(|v| i64::from(v))?;
+        let mut flip = false;
+        if end <= start { flip = true; (end, start) = (start, end); };
         let haystack = str::from_utf8(haystack)?;
         let needle = str::from_utf8(needle)?;
-        let mut buf = String::new();
+        let mut strings = Vec::new();
         for i in start ..= end {
-            let mut h = String::new();
-            h.try_reserve(haystack.len())?;
-            h.push_str(haystack);
-            h = h.replace(needle, &format!("{i}"));
-            buf.try_reserve(h.len())?;
-            buf.push_str(&h);
+            strings.push(haystack.replace(needle, &format!("{i}")));
             if i.checked_add(1).is_some_and(|i| i <= end) {
-                buf.try_reserve(joiner.len())?;
-                buf.push_str(joiner);
+                strings.push(String::from(joiner));
             }
         }
-        Ok(Cow::Owned(buf.into_bytes()))
+        if flip {
+            strings.reverse();
+        }
+        Ok(Cow::Owned(strings.concat().into_bytes()))
     }
 
     /// Repeats a string for each element in a list, replacing one pattern in each
