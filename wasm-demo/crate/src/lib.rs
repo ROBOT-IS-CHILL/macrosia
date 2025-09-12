@@ -205,7 +205,7 @@ pub unsafe fn evaluate(mac: String) -> Promise {
     let exec = Box::into_raw(Box::new(exec));
     let reg = Box::into_raw(Box::new(VariableRegistry::new()));
     let s = Box::into_raw(mac.into_bytes().into_boxed_slice());
-    let func = (&mut *exec).evaluate(&*s, &mut *reg);
+    let func = (&mut *exec).evaluate(&*s, &mut *reg, None);
 
     wasm_bindgen_futures::future_to_promise(ExecFuture {
         exec,

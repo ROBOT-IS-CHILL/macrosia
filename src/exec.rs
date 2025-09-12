@@ -182,6 +182,7 @@ impl Executor {
         &'slf self,
         string: &'buf [u8],
         reg: &'reg mut VariableRegistry,
+        step_limit: Option<usize>
     ) -> impl FnMut() -> Option<Result<Cow<'buf, [u8]>, MacroError>> {
         self.current_step.store(0, Ordering::Relaxed);
         let mut rng = rand::rngs::SmallRng::from_rng(&mut rand::rng());
@@ -193,7 +194,15 @@ impl Executor {
         }]));
 
         move || {
-            self.current_step.fetch_add(1, Ordering::Relaxed);
+            let step = self.current_step.fetch_add(1, Ordering::Relaxed);
+            if let Some(lim) = step_limit.filter(|l| step >= *l) {
+                return Some(Err(MacroError {
+                    message: Cow::Owned(format!(
+                        "reached step limit of {lim}",
+                    )),
+                    trace: self.get_trace(stack_opt.take().unwrap()),
+                }));
+            }
             let Some(ref mut stack) = stack_opt else {
                 return Some(Err("called after done".into()));
             };
