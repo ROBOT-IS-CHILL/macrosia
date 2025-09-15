@@ -3,7 +3,7 @@ use std::{
     collections::HashMap,
     hash::BuildHasherDefault,
     iter::FromFn,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
 };
 
 use rand::SeedableRng;
@@ -15,7 +15,7 @@ type MacroMap = HashMap<Vec<u8>, Box<dyn Macro>, BuildHasherDefault<seahash::Sea
 /// An executor interface for Macrosia.
 pub struct Executor {
     macros: MacroMap,
-    context: u8,
+    context: AtomicU8,
     current_step: AtomicUsize,
 }
 
@@ -27,7 +27,7 @@ impl Clone for Executor {
                 .iter()
                 .map(|(key, mac)| (key.clone(), Macro::clone(&**mac)))
                 .collect(),
-            context: self.context,
+            context: AtomicU8::new(self.context.load(Ordering::Relaxed)),
             current_step: AtomicUsize::new(0),
         }
     }
@@ -60,15 +60,20 @@ impl Executor {
     pub fn new(context: u8) -> Self {
         Self {
             macros: HashMap::default(),
-            context,
+            context: AtomicU8::new(context),
             current_step: AtomicUsize::new(0),
         }
     }
 
+    /// Sets the context in which this executor is running.
+    pub fn set_context(&self, context: u8) -> u8 {
+        self.context.swap(context, Ordering::Relaxed)
+    }
+
     /// Gets the context in which this executor is running.
     #[inline]
-    pub const fn context(&self) -> u8 {
-        self.context
+    pub fn context(&self) -> u8 {
+        self.context.load(Ordering::Relaxed)
     }
 
     /// Gets a macro from the executor.
@@ -85,6 +90,12 @@ impl Executor {
     /// Adds a macro to the executor.
     pub fn add_macro(&mut self, mac: impl Macro + 'static) {
         self.add_macro_mono(Box::new(mac))
+    }
+
+        #[inline]
+    /// Adds a macro to the executor.
+    pub fn clear_macros(&mut self) {
+        self.macros.clear();
     }
 
     fn add_macro_mono(&mut self, mac: Box<dyn Macro>) {
