@@ -189,7 +189,8 @@ impl Executor {
         &'slf self,
         string: &'buf [u8],
         reg: &'reg mut VariableRegistry,
-        step_limit: Option<usize>
+        step_limit: Option<usize>,
+        mut debug_log: Option<&mut Vec<String>>
     ) -> impl FnMut() -> Option<Result<Cow<'buf, [u8]>, MacroError>> {
         self.current_step.store(0, Ordering::Relaxed);
         let mut rng = rand::rngs::SmallRng::from_rng(&mut rand::rng());
@@ -201,15 +202,6 @@ impl Executor {
         }]));
 
         move || {
-            let step = self.current_step.fetch_add(1, Ordering::Relaxed);
-            if let Some(lim) = step_limit.filter(|l| step >= *l) {
-                return Some(Err(MacroError {
-                    message: Cow::Owned(format!(
-                        "reached step limit of {lim}",
-                    )),
-                    trace: self.get_trace(stack_opt.take().unwrap()),
-                }));
-            }
             let Some(ref mut stack) = stack_opt else {
                 return Some(Err("called after done".into()));
             };
@@ -228,6 +220,19 @@ impl Executor {
                     triple.target = top.concat(&triple.target);
                     return None;
                 };
+                let step = self.current_step.fetch_add(1, Ordering::Relaxed);
+                if let Some(lim) = step_limit.filter(|l| step >= *l) {
+                    return Some(Err(MacroError {
+                        message: Cow::Owned(format!(
+                            "reached step limit of {lim}",
+                        )),
+                        trace: self.get_trace(stack_opt.take().unwrap()),
+                    }));
+                }
+                if let Some(ref mut log) = debug_log {
+                    log.push(format!("[Step {step}]"));
+                    log.push(String::from_utf8_lossy(&top.target[start .. end]).into_owned());
+                }
                 let mut args = Self::split_args(&top.target[start + 1..end - 1]);
                 let name = args
                     .next()
