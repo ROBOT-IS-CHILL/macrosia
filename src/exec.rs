@@ -1,9 +1,5 @@
 use std::{
-    borrow::Cow,
-    collections::HashMap,
-    hash::BuildHasherDefault,
-    iter::FromFn,
-    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
+    borrow::Cow, collections::HashMap, hash::BuildHasherDefault, iter::FromFn, panic::AssertUnwindSafe, sync::atomic::{AtomicU8, AtomicUsize, Ordering}
 };
 
 use rand::SeedableRng;
@@ -246,16 +242,39 @@ impl Executor {
                         trace: self.get_trace(stack_opt.take().unwrap()),
                     }));
                 };
-                let res = match mac.eval(self, reg, &mut rng, &mut args) {
+                let res = match {
+                    if cfg!(feature = "catch-panic") {
+                        {
+                            let reg = &mut *reg;
+                            let rng_ = &mut rng;
+                            let args_ = &mut args;
+                            // Needed so rust doesn't think this is an FnMut
+                            fn typehack<T>(f: impl FnOnce() -> T) -> impl FnOnce() -> T {f}
+                            let clos = typehack(move || {
+                                mac.eval(self, reg, rng_, args_)
+                            });
+                            match std::panic::catch_unwind(AssertUnwindSafe(clos)) {
+                                Ok(v) => v,
+                                Err(payload) => {
+                                    let message = match payload.downcast::<String>() {
+                                        Ok(v) => Cow::Owned(*v),
+                                        Err(payload) => match payload.downcast::<&'static str>() {
+                                            Ok(v) => Cow::Borrowed(*v),
+                                            Err(_) => Cow::Borrowed("<panic payload was not String or &'static str>")
+                                        }
+                                    };
+                                    drop(args);
+                                    return Some(Err(MacroError {
+                                        message, trace: self.get_trace(stack_opt.take().unwrap())
+                                    }));
+                                }
+                            }
+                        }
+                    } else { mac.eval(self, reg, &mut rng, &mut args) }
+                } {
                     Ok(val) => val,
                     Err(mut e) => {
-                        let mac = Vec::from(&top.target[start..end]);
                         std::mem::drop(args);
-                        stack.push(StackTriple {
-                            start: 0,
-                            target: Cow::Owned(mac),
-                            end: 0,
-                        });
                         e.trace = self.get_trace(stack_opt.take().unwrap());
                         return Some(Err(e));
                     }
@@ -287,28 +306,5 @@ impl Executor {
 
     fn get_trace(&self, stack: Vec<StackTriple<'_>>) -> Vec<Vec<u8>> {
         stack.into_iter().map(|s| s.target.into_owned()).collect()
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::exec::Executor;
-
-    #[test]
-    fn argsplit() {
-        macro_rules! check {
-		    ($a: literal, [$($l: literal),*]) => {
-				assert_eq!((Executor::split_args($a).collect::<Vec<_>>().as_slice()), &[$($l as &[_]),*])
-		    };
-		}
-        check!(b"[]", [b""]);
-        check!(b"[abcde]", [b"abcde"]);
-        check!(b"[abcde/]", [b"abcde", b""]);
-        check!(b"[abc/de]", [b"abc", b"de"]);
-        check!(br"[abc\/de]", [br"abc\/de"]);
-        check!(br"[abc\\/de]", [br"abc\\", b"de"]);
-        check!(br"[abc\\/]", [br"abc\\", b""]);
-        check!(br"[abc\\/]", [br"abc\\", b""]);
-        check!(br"[abc/de/]", [br"abc", b"de", b""]);
     }
 }

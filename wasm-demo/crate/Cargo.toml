@@ -7,10 +7,13 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-macrosia = {path = "../..", features = ["wasm"]}
+macrosia = {path = "../..", features = ["wasm", "catch-panic"]}
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 wasm-bindgen-futures = "0.4"
 itertools = "0.14"
 serde-wasm-bindgen = "0.6"
 serde = "1"
+
+[profile.release]
+panic="unwind"

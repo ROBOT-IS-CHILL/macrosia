@@ -168,7 +168,8 @@ pub fn initialize_executor(database_macros: Object) {
 
         exec.add_macro(TilesMacro);
 
-        exec.with_stdlib()
+        exec.add_stdlib();
+        exec
     });
 }
 
@@ -217,7 +218,8 @@ pub unsafe fn evaluate(mac: String) -> Promise {
 
 #[wasm_bindgen]
 pub fn get_stdlib_macro_names() -> Vec<String> {
-    let exec: Executor = Executor::new(0).with_stdlib();
+    let mut exec: Executor = Executor::new(0);
+    exec.add_stdlib();
     exec.macros().iter()
         .map(|(v, m)| format!("{}\n{}",
             String::from_utf8_lossy(&*v).into_owned(),

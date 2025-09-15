@@ -71,11 +71,10 @@ macro_rules! def_macro {
 
         /// Adds all standard library macros to the given execution context.
         #[allow(deprecated)]
-        pub fn with_stdlib(mut self) -> Self {
+        pub fn add_stdlib(&mut self) {
             $(
                 self.add_macro($sname);
             )*
-            self
         }
     }
 
@@ -1059,6 +1058,11 @@ def_macro! {
         let mut vec = Vec::new();
         e.read_to_end(&mut vec).map_err(|e| format!("failed to decompress data: {e}"))?;
         Ok(Cow::Owned(vec))
+    }
+
+    /// Panics.
+    pub macro Panic [b"panic"] () + _x, _v, _r {
+        panic!("panicked")
     }
 
     /// Sets a single byte of a variable to a hexadecimal value.

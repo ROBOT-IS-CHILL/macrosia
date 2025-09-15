@@ -19,3 +19,4 @@ flate2 = { version = "1.0.17", features = ["zlib-rs"], default-features = false 
 [features]
 default = []
 wasm = ["dep:getrandom"]
+catch-panic = []
