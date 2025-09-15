@@ -89,6 +89,9 @@ struct TilesMacro;
 
 impl Macro for TilesMacro {
     fn name(&self) -> &[u8] { b"tiles" }
+    fn source(&self) -> &[u8] {
+        b"<yea i can't be assed to figure out how to make this show up here sorry>"
+    }
     fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(
         &self,
         _x: &'exec macrosia::Executor,

@@ -64,6 +64,7 @@ macro_rules! def_macro {
                 $body
             }
             fn clone(&self) -> Box<dyn Macro> { Box::new(*self) }
+            fn source(&self) -> &[u8] { stringify!($body).trim().as_bytes() }
         }
     )*
 

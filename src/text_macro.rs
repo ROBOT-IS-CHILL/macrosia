@@ -22,6 +22,10 @@ impl Macro for TextMacro {
         &*self.name
     }
 
+    fn source(&self) -> &[u8] {
+        &*self.source
+    }
+
     fn description(&self) -> &str {
         &*self.description
     }

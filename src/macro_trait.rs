@@ -85,6 +85,8 @@ pub trait Macro: Send + Sync {
     fn name(&self) -> &[u8];
     /// The macro's description.
     fn description(&self) -> &str;
+    /// The macro's source code.
+    fn source(&self) -> &[u8];
     /// Evaluates the macro.
     fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(
         &self,
