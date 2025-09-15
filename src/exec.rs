@@ -192,7 +192,7 @@ impl Executor {
         step_limit: Option<usize>,
         mut debug_log: Option<&mut Vec<String>>
     ) -> impl FnMut() -> Option<Result<Cow<'buf, [u8]>, MacroError>> {
-        self.current_step.store(0, Ordering::Relaxed);
+        self.current_step.store(1, Ordering::Relaxed);
         let mut rng = rand::rngs::SmallRng::from_rng(&mut rand::rng());
 
         let mut stack_opt = Some(Vec::<StackTriple<'buf>>::from([StackTriple {
