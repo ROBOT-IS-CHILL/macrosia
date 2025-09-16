@@ -1,6 +1,7 @@
 //! Defines some basic macros for regular use.
 
 use crate::{Macro, MacroError, Number, var_reg::VariableRegistry};
+use aho_corasick::AhoCorasick;
 use base64::Engine;
 use const_format::concatcp;
 use flate2::{Compression, write::ZlibEncoder, read::ZlibDecoder};
@@ -410,35 +411,31 @@ def_macro! {
         ))
     }
 
-    /// Replaces a string within another string, using plain string matching.
+    /// Replaces a string within another string, using the Aho-Corasick algorithm.
+    ///
+    /// All replacements happen _at once_, meaning, for example,
+    /// `[replace/baba/a/i/bibi/koko]` will be `bibi`, not `koko`.
+    ///
     /// # Arguments
     /// 1. The string to replace substrings of
     /// 2... The substring to replace
     /// 3... The string to replace the substring with
     pub macro SReplace [b"sreplace"] (haystack, ...iter) + _x, _v, _r {
-        let mut haystack = Vec::from(haystack);
+        let mut builder = AhoCorasick::builder();
+        builder.kind(Some(aho_corasick::AhoCorasickKind::NoncontiguousNFA));
+        let mut patterns = vec![];
+        let mut replacements = vec![];
         for mut chunk in &iter.chunks(2) {
             let needle = chunk.next().expect("first of chunk cannot be empty");
             let Some(value) = chunk.next() else { return Err("replace requires an odd number of arguments")?; };
             if needle.is_empty() {
                 Err("search pattern value cannot be empty")?
             }
-            let mut strings = vec![];
-            let mut i = 0;
-            let mut last = 0;
-            while i <= haystack.len() - needle.len() {
-                if haystack[i..].starts_with(needle) {
-                    strings.try_reserve(i - last + value.len()).map_err(|_| "cannot allocate enough memory for replaced string")?;
-                    strings.extend(&haystack[last .. i]);
-                    strings.extend(value);
-                    i += needle.len();
-                    last = i;
-                } else { i += 1; }
-            }
-            strings.try_reserve(haystack[last..].len()).map_err(|_| "cannot allocate enough memory for replaced string")?;
-            strings.extend(&haystack[last ..]);
-            haystack = strings;
+            patterns.push(needle);
+            replacements.push(value);
         }
+        let repl = builder.build(patterns).map_err(|err| format!("failed to build replacement algorithm: {err}"))?;
+        let haystack = repl.try_replace_all_bytes(&haystack, &replacements).map_err(|err| format!("failed to replace: {err}"))?;
         Ok(Cow::Owned(haystack))
     }
 
