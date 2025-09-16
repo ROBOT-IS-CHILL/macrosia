@@ -787,7 +787,7 @@ def_macro! {
     pub macro UnixTime [b"unixtime"] () + _x, _v, _r {
         let time = web_time::SystemTime::now();
         let since = time.duration_since(web_time::SystemTime::UNIX_EPOCH).map_err(|_| "getting time since unix epoch failed")?;
-        Ok(Cow::Owned(format!("{:0.3}", since.as_secs_f64()).into_bytes()))
+        Ok(Cow::Owned(format!("{}", since.as_secs_f64()).into_bytes()))
     }
 
     /// Slices the given string by a start, stop, and optional step, based on UTF-8 characters.
