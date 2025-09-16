@@ -199,7 +199,7 @@ impl Executor {
         let mut stack_opt = Some(Vec::<StackTriple<'buf>>::from([StackTriple {
             start: 0,
             target: Cow::Borrowed(string),
-            end: 0,
+            end: string.len(),
         }]));
 
         move || {
