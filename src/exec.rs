@@ -1,5 +1,5 @@
 use std::{
-    borrow::Cow, collections::HashMap, hash::BuildHasherDefault, iter::FromFn, panic::AssertUnwindSafe, sync::atomic::{AtomicU8, AtomicUsize, Ordering}
+    borrow::Cow, collections::HashMap, hash::BuildHasherDefault, iter::FromFn, panic::AssertUnwindSafe, sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering}
 };
 
 use rand::SeedableRng;
@@ -190,7 +190,8 @@ impl Executor {
         string: &'buf [u8],
         reg: &'reg mut VariableRegistry,
         step_limit: Option<usize>,
-        mut debug_log: Option<&mut Vec<String>>
+        mut debug_log: Option<&mut Vec<String>>,
+        kill: &AtomicBool
     ) -> impl FnMut() -> Option<Result<Cow<'buf, [u8]>, MacroError>> {
         self.current_step.store(1, Ordering::Relaxed);
         let mut rng = rand::rngs::SmallRng::from_rng(&mut rand::rng());
@@ -209,6 +210,14 @@ impl Executor {
                 Ok(v) => v,
                 Err(e) => return Some(Err(e.into())),
             };
+            if kill.load(Ordering::Relaxed) {
+                return Some(Err(MacroError {
+                    message: Cow::Owned(format!(
+                        "macro execution timed out",
+                    )),
+                    trace: self.get_trace(stack_opt.take().unwrap()),
+                }));
+            }
             let (res, start, end) = {
                 let Some([start, end]) = Self::find_first_block(&top.target) else {
                     let top = stack.pop().unwrap();

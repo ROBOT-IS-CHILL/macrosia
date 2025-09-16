@@ -71,10 +71,6 @@ impl Future for ExecFuture {
                     return Poll::Ready(Ok(res_str.into()));
                 }
             }
-            if KILL_MACROS.load(Ordering::Relaxed) {
-                KILL_MACROS.store(false, Ordering::Relaxed);
-                return Poll::Ready(Ok("[Execution cancelled.]".into()));
-            }
             let waker = ctx.waker().clone();
             let closure = Closure::once_into_js(move || waker.wake());
             setTimeout(closure, 0);
@@ -136,11 +132,6 @@ impl Macro for TilesMacro {
     }
     fn clone(&self) -> Box<dyn macrosia::Macro> { Box::new(Self) }
     fn description(&self) -> &str { "" }
-}
-
-#[wasm_bindgen]
-pub fn cancel_running_macro() {
-    KILL_MACROS.store(true, Ordering::Relaxed)
 }
 
 #[wasm_bindgen]
@@ -209,7 +200,7 @@ pub unsafe fn evaluate(mac: String) -> Promise {
     let exec = Box::into_raw(Box::new(exec));
     let reg = Box::into_raw(Box::new(VariableRegistry::new()));
     let s = Box::into_raw(mac.into_bytes().into_boxed_slice());
-    let func = (&mut *exec).evaluate(&*s, &mut *reg, None, None);
+    let func = (&mut *exec).evaluate(&*s, &mut *reg, None, None, &KILL_MACROS);
 
     wasm_bindgen_futures::future_to_promise(ExecFuture {
         exec,
