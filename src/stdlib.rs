@@ -1061,11 +1061,6 @@ def_macro! {
         Ok(Cow::Owned(vec))
     }
 
-    /// Panics.
-    pub macro Panic [b"panic"] () + _x, _v, _r {
-        panic!("panicked")
-    }
-
     /// Sets a single byte of a variable to a hexadecimal value.
     /// # Arguments
     /// 1. The variable to index into.
