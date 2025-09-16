@@ -529,7 +529,7 @@ def_macro! {
     /// 1. The string to get the length of. Must be valid UTF-8.
     pub macro Length [b"len"] (value) + _x, _v, _r {
         str::from_utf8(value).ok()
-            .map(|value| Cow::Owned(format!("{}", value.len()).into_bytes()))
+            .map(|value| Cow::Owned(format!("{}", value.chars().count()).into_bytes()))
             .ok_or_else(|| "value was not valid UTF-8".into())
     }
 
