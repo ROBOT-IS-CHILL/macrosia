@@ -81,6 +81,11 @@ impl Future for ExecFuture {
 
 static KILL_MACROS: AtomicBool = AtomicBool::new(false);
 
+#[wasm_bindgen]
+pub fn cancel_running_macro() {
+    KILL_MACROS.store(true, Ordering::Relaxed)
+}
+
 struct TilesMacro;
 
 impl Macro for TilesMacro {
