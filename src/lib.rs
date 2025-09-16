@@ -12,7 +12,7 @@ pub mod stdlib;
 mod text_macro;
 mod var_reg;
 
-pub use rand;
+pub use rand_xoshiro;
 pub use regex;
 
 pub use exec::Executor;

@@ -2,6 +2,9 @@ use std::collections::TryReserveError;
 use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 
+use rand::{RngCore, SeedableRng};
+use rand_xoshiro::Xoshiro128PlusPlus;
+
 use crate::Cow;
 use crate::var_reg::VariableRegistry;
 
@@ -92,7 +95,7 @@ pub trait Macro: Send + Sync {
         &self,
         exec: &'exec crate::exec::Executor,
         vars: &'reg mut VariableRegistry,
-        rng: &mut rand::rngs::SmallRng,
+        rng: &mut Xoshiro128PlusPlus,
         args: &mut dyn Iterator<Item = &'arg [u8]>,
     ) -> Result<Cow<'static, [u8]>, MacroError>;
     /// Clones this macro into a box;

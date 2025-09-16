@@ -6,8 +6,7 @@ use base64::Engine;
 use const_format::concatcp;
 use flate2::{Compression, write::ZlibEncoder, read::ZlibDecoder};
 use itertools::Itertools as _;
-use rand::Rng;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use regex::Regex;
 use std::io::prelude::*;
 use std::{
@@ -16,6 +15,7 @@ use std::{
     ops::{Add as _, Mul as _},
     sync::OnceLock,
 };
+use rand_xoshiro::Xoshiro128PlusPlus;
 
 macro_rules! regex {
     ($re:literal $(,)?) => {{
@@ -60,7 +60,7 @@ macro_rules! def_macro {
             fn description(&self) -> &str {
                 concat!($($doc, "\n"),*)
             }
-            fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(&self, $x: &'exec crate::exec::Executor, $v: &'reg mut VariableRegistry, $r: &mut rand::rngs::SmallRng, args: &mut dyn Iterator<Item = &'arg [u8]>) -> Result<Cow<'static, [u8]>, MacroError> {
+            fn eval<'arg, 'reg: 'arg, 'exec: 'reg>(&self, $x: &'exec crate::exec::Executor, $v: &'reg mut VariableRegistry, $r: &mut Xoshiro128PlusPlus, args: &mut dyn Iterator<Item = &'arg [u8]>) -> Result<Cow<'static, [u8]>, MacroError> {
                 args!($args <- args);
                 $body
             }
@@ -460,7 +460,7 @@ def_macro! {
     /// 1? A string to seed the RNG with.
     pub macro Random [b"rand"] (...iter) + _x, _v, r {
         if let Some(seed) = iter.next() {
-            *r = rand::rngs::SmallRng::seed_from_u64(seahash::hash(seed));
+            *r = Xoshiro128PlusPlus::seed_from_u64(seahash::hash(seed));
         }
         Ok(Cow::Owned(format!("{}", r.random::<f64>()).into_bytes()))
     }

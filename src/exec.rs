@@ -2,7 +2,7 @@ use std::{
     borrow::Cow, collections::HashMap, hash::BuildHasherDefault, iter::FromFn, panic::AssertUnwindSafe, sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering}
 };
 
-use rand::SeedableRng;
+use rand_xoshiro::{rand_core::SeedableRng, Xoshiro128PlusPlus};
 
 use crate::{Macro, MacroError, var_reg::VariableRegistry};
 
@@ -195,7 +195,7 @@ impl Executor {
         kill: &AtomicBool
     ) -> impl FnMut() -> Option<Result<Cow<'buf, [u8]>, MacroError>> {
         self.current_step.store(1, Ordering::Relaxed);
-        let mut rng = rand::rngs::SmallRng::from_rng(&mut rand::rng());
+        let mut rng = Xoshiro128PlusPlus::from_rng(&mut rand::rng());
 
         let mut stack_opt = Some(Vec::<StackTriple<'buf>>::from([StackTriple {
             start: 0,

@@ -1,5 +1,7 @@
 //! Handles text-defined macros.
 
+use rand_xoshiro::Xoshiro128PlusPlus;
+
 use crate::stdlib::BYTES;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -42,7 +44,7 @@ impl Macro for TextMacro {
         &self,
         exec: &'exec crate::exec::Executor,
         _vars: &'reg mut crate::VariableRegistry,
-        _rng: &mut rand::rngs::SmallRng,
+        _rng: &mut Xoshiro128PlusPlus,
         args: &mut dyn Iterator<Item = &'arg [u8]>,
     ) -> Result<std::borrow::Cow<'static, [u8]>, crate::MacroError> {
         let args = args.collect::<Vec<_>>();

@@ -175,8 +175,9 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 
 [[package]]
 name = "macrosia"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
+ "aho-corasick",
  "base64",
  "const_format",
  "flate2",
@@ -184,6 +185,7 @@ dependencies = [
  "itertools",
  "num-complex",
  "rand",
+ "rand_xoshiro",
  "regex",
  "seahash",
  "stacker",
@@ -298,6 +300,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
 dependencies = [
  "getrandom",
+]
+
+[[package]]
+name = "rand_xoshiro"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f703f4665700daf5512dcca5f43afa6af89f09db47fb56be587f80636bda2d41"
+dependencies = [
+ "rand_core",
 ]
 
 [[package]]
