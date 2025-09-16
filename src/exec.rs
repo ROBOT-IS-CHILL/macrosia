@@ -210,14 +210,6 @@ impl Executor {
                 Ok(v) => v,
                 Err(e) => return Some(Err(e.into())),
             };
-            if kill.load(Ordering::Relaxed) {
-                return Some(Err(MacroError {
-                    message: Cow::Owned(format!(
-                        "macro execution timed out",
-                    )),
-                    trace: self.get_trace(stack_opt.take().unwrap()),
-                }));
-            }
             let (res, start, end) = {
                 let Some([start, end]) = Self::find_first_block(&top.target) else {
                     let top = stack.pop().unwrap();
@@ -230,6 +222,14 @@ impl Executor {
                     return None;
                 };
                 let step = self.current_step.fetch_add(1, Ordering::Relaxed);
+                if step % 65536 == 0 && kill.load(Ordering::Relaxed) {
+                    return Some(Err(MacroError {
+                        message: Cow::Owned(format!(
+                            "macro execution timed out",
+                        )),
+                        trace: self.get_trace(stack_opt.take().unwrap()),
+                    }));
+                }
                 if let Some(lim) = step_limit.filter(|l| step >= *l) {
                     return Some(Err(MacroError {
                         message: Cow::Owned(format!(
