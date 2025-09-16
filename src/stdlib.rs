@@ -6,6 +6,7 @@ use base64::Engine;
 use const_format::concatcp;
 use flate2::{Compression, write::ZlibEncoder, read::ZlibDecoder};
 use itertools::Itertools as _;
+use rand::seq::SliceRandom as _;
 use rand::{Rng, SeedableRng};
 use regex::Regex;
 use std::io::prelude::*;
@@ -463,6 +464,15 @@ def_macro! {
             *r = Xoshiro128PlusPlus::seed_from_u64(seahash::hash(seed));
         }
         Ok(Cow::Owned(format!("{}", r.random::<f64>()).into_bytes()))
+    }
+
+    /// Shuffles the given arguments.
+    /// # Arguments
+    /// 1... The arguments to shuffle.
+    pub macro Shuffle [b"random.shuffle"] (...iter) + _x, _v, r {
+        let mut args = iter.collect::<Vec<_>>();
+        args.shuffle(r);
+        Ok(Cow::Owned(args.join(b"/" as &[u8])))
     }
 
     /// Converts the first argument to an integer.
