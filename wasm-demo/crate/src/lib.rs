@@ -175,6 +175,7 @@ pub fn initialize_executor(database_macros: Object) {
 #[wasm_bindgen]
 #[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe fn evaluate(mac: String) -> Promise {
+    KILL_MACROS.set(false, Ordering::Relaxed);
     let mut exec: Executor = BASE_EXECUTOR.get()
         .expect("executor should be initialized by now")
         .clone();
