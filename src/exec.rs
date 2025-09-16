@@ -240,8 +240,9 @@ impl Executor {
                     }));
                 }
                 if let Some(ref mut log) = debug_log {
-                    log.push(format!("[Step {step}]"));
-                    log.push(String::from_utf8_lossy(&top.target[start .. end]).into_owned());
+                    log.push(format!("  [Step {step}]"));
+                    log.push(format!("[Target] {}", String::from_utf8_lossy(&top.target[start .. end])));
+                    log.push(format!("[Context] {}", String::from_utf8_lossy(&top.target)));
                 }
                 let mut args = Self::split_args(&top.target[start..end]);
                 let name = args
