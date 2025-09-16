@@ -39,11 +39,9 @@ impl<'s> StackTriple<'s> {
         if self.start == 0 && self.end == parent.len() {
             return self.target;
         }
-        let mut buf = vec![0; parent.len() + self.target.len() - (self.end - self.start)];
-        buf[..self.start].copy_from_slice(&parent[..self.start]);
-        buf[self.start..self.start + self.target.len()].copy_from_slice(&*self.target);
-        buf[self.start + self.target.len()..].copy_from_slice(&parent[self.end..]);
-        return Cow::Owned(buf);
+        return Cow::Owned(
+            [&parent[..self.start], &*self.target, &parent[self.end..]].concat()
+        );
     }
 }
 
@@ -101,16 +99,18 @@ impl Executor {
     fn find_first_block(str: &[u8]) -> Option<[usize; 2]> {
         let mut start = 0;
         let mut last_escape = false;
+        let mut found_any = false;
         for (i, c) in str.iter().copied().enumerate() {
             if last_escape {
                 last_escape = false;
                 continue;
             }
             if c == b'[' {
+                found_any = true;
                 start = i;
                 continue;
             }
-            if c == b']' {
+            if c == b']' && found_any {
                 return Some([start, i + 1]);
             }
             if c == b'\\' {
@@ -121,10 +121,11 @@ impl Executor {
         None
     }
 
-    // Split a macro block `a/b/c/d/...` into its arguments, properly handling any escaped slashes.
+    // Split a macro block `[a/b/c/d/...]` into its arguments, properly handling any escaped slashes.
     // Returns a single empty string if the macro is empty.
     pub(crate) fn split_args<'a>(str: &'a [u8]) -> FromFn<impl FnMut() -> Option<&'a [u8]>> {
         let mut str_left = str;
+        str_left = str_left.strip_prefix(b"[").and_then(|s| s.strip_suffix(b"]")).unwrap_or(str_left);
         let mut done = false;
 
         let mut was_escape = false;
@@ -199,7 +200,7 @@ impl Executor {
         let mut stack_opt = Some(Vec::<StackTriple<'buf>>::from([StackTriple {
             start: 0,
             target: Cow::Borrowed(string),
-            end: string.len(),
+            end: 0,
         }]));
 
         move || {
@@ -242,7 +243,7 @@ impl Executor {
                     log.push(format!("[Step {step}]"));
                     log.push(String::from_utf8_lossy(&top.target[start .. end]).into_owned());
                 }
-                let mut args = Self::split_args(&top.target[start + 1..end - 1]);
+                let mut args = Self::split_args(&top.target[start..end]);
                 let name = args
                     .next()
                     .expect("macro must have at least one argument (its name)");
