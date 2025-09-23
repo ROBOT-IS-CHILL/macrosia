@@ -577,11 +577,13 @@ def_macro! {
             }
             let Some(value) = chunk.next() else { return Err("replace requires an odd number of arguments")?; };
             let mut replacement = str::from_utf8(value)?.to_string();
-            replacement = replacement.replace("$", "$$");
-            replacement = regex!(r"\\g<([a-zA-Z_][a-zA-Z_0-9]*)>")
-                .replace_all(&replacement, r"$$$1").to_string();
-            replacement = regex!(r"\\(\d+)")
-                .replace_all(&replacement, r"$$$1").to_string();
+            replacement = regex!(r"\\(\d+)|\$").replace_all(&replacement, |caps: &regex::Captures| {
+                if let Some(digits) = caps.get(1) {
+                    format!("${{{}}}", digits.as_str())
+                } else {
+                    "$$".to_string()
+                }
+            }).to_string();
 
             let pat = Regex::new(needle).map_err(|_| format!("invalid regex pattern: {needle}"))?;
             haystack = pat.replace_all(&haystack, replacement).into_owned();
@@ -607,9 +609,16 @@ def_macro! {
                 Err("search pattern value cannot be empty")?
             }
             let Some(value) = chunk.next() else { return Err("replace requires an odd number of arguments")?; };
-            let replacement = String::from_utf8(
+            let mut replacement = String::from_utf8(
                 unescape(value).into_owned()
             )?;
+            replacement = regex!(r"\\(\d+)|\$").replace_all(&replacement, |caps: &regex::Captures| {
+                if let Some(digits) = caps.get(1) {
+                    format!("${{{}}}", digits.as_str())
+                } else {
+                    "$$".to_string()
+                }
+            }).to_string();
             let pat = Regex::new(&needle).map_err(|_| format!("invalid regex pattern: {needle}"))?;
             haystack = pat.replace_all(&haystack, &replacement).into_owned();
         }

@@ -105,7 +105,7 @@
       * {
         box-sizing: border-box;
       }
-      div#editor {
+      div#editor, textarea#editor {
         margin: 6pt;
         border-radius: 6pt;
         padding: 6pt;
@@ -124,6 +124,13 @@
       .ace_def_macro {
         font-weight: 500;
         color: #fcbca6;
+      }
+      textarea#editor {
+        resize: none;
+        background-color: black;
+        color: white;
+        white-space: nowrap;
+        overflow-x: auto;
       }
     </style>
   </head>
@@ -239,122 +246,133 @@ Builtins:
         std_macros[name] = desc;
         std_macro_regexes.push(RegExp.escape(name))
       }
+      if (typeof ace !== "undefined") {
+        ace.define('ace/mode/macrosia', ['require', 'exports', 'module'],
+          function(require, exports, module) {
+            "use strict";
 
-      ace.define('ace/mode/macrosia', ['require', 'exports', 'module'],
-        function(require, exports, module) {
-          "use strict";
+            let oop = require("ace/lib/oop");
+            let TextMode = require("ace/mode/text").Mode;
+            let Tokenizer = require("ace/tokenizer").Tokenizer;
+            let CstyleBehaviour = require("ace/mode/behaviour/cstyle").CstyleBehaviour;
+            let TextHighlightRules = require("ace/mode/text_highlight_rules").TextHighlightRules;
+            let BaseMode = require("ace/mode/folding/fold_mode").FoldMode;
+            let Range = require("ace/range").Range;
+            let TokenIterator = require("ace/token_iterator").TokenIterator;
 
-          let oop = require("ace/lib/oop");
-          let TextMode = require("ace/mode/text").Mode;
-          let Tokenizer = require("ace/tokenizer").Tokenizer;
-          let CstyleBehaviour = require("ace/mode/behaviour/cstyle").CstyleBehaviour;
-          let TextHighlightRules = require("ace/mode/text_highlight_rules").TextHighlightRules;
-          let BaseMode = require("ace/mode/folding/fold_mode").FoldMode;
-          let Range = require("ace/range").Range;
-          let TokenIterator = require("ace/token_iterator").TokenIterator;
+            let FoldMode = function() {};
 
-          let FoldMode = function() {};
+            oop.inherits(FoldMode, BaseMode);
 
-          oop.inherits(FoldMode, BaseMode);
+            (function() {
+                this.foldingStartMarker = /(?<!\\)(?:\\\\)*\[/;
+                this.foldingStopMarker = /(?<!\\)(?:\\\\)*\]/;
+            }).call(BaseMode.prototype);
 
-          (function() {
-              this.foldingStartMarker = /(?<!\\)(?:\\\\)*\[/;
-              this.foldingStopMarker = /(?<!\\)(?:\\\\)*\]/;
-          }).call(BaseMode.prototype);
-
-          let MacrosiaHighlight = function() {
-              this.$rules = {
-                  "start": [
-                      {
-                        token: "keyword",
-                        regex: /^#define/,
-                        next: "macro_name"
-                      },
+            let MacrosiaHighlight = function() {
+                this.$rules = {
+                    "start": [
+                        {
+                          token: "keyword",
+                          regex: /^#define/,
+                          next: "macro_name"
+                        },
+                        {
+                          token: "string",
+                          regex: /\\/,
+                          next: "escaped"
+                        },
+                        {
+                          token: "keyword.operator",
+                          regex: /[\[\]]/,
+                        },
+                        {
+                          token: "keyword.control",
+                          regex: /\//
+                        },
+                        {
+                          token: "std_macro",
+                          regex: `(?<=\\[)(?:tiles|${std_macro_regexes.join("|")})(?=[\\/\\]])`
+                        },
+                        {
+                          token: "db_macro",
+                          regex: `(?<=\\[)(?:${db_macro_regexes.join("|")})(?=[\\/\\]])`
+                        },
+                        {
+                          token: "variable.language",
+                          regex: /\$(-?\d+|#|!)/
+                        },
+                        {
+                          token: "string",
+                          regex: /\$(?!-?\d+|#|!)/
+                        },
+                        {
+                          token: "def_macro",
+                          regex: /(?<=\[)(?:[^\[\]/\\\$]+)(?=[\/\]])/
+                        },
+                        {
+                          token: "constant.numeric",
+                          regex: /(?<=[\[\/])[-+]?(?:(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)j?|(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)[+-](?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)j)(?=[\/\]])/
+                        },
+                        {
+                          token: "string",
+                          regex: /[^\[\]\/\\\$]+/
+                        },
+                    ],
+                    "escaped": [
                       {
                         token: "string",
-                        regex: /\\/,
-                        next: "escaped"
-                      },
-                      {
-                        token: "keyword.operator",
-                        regex: /[\[\]]/,
-                      },
-                      {
-                        token: "keyword.control",
-                        regex: /\//
-                      },
-                      {
-                        token: "std_macro",
-                        regex: `(?<=\\[)(?:tiles|${std_macro_regexes.join("|")})(?=[\\/\\]])`
-                      },
-                      {
-                        token: "db_macro",
-                        regex: `(?<=\\[)(?:${db_macro_regexes.join("|")})(?=[\\/\\]])`
-                      },
-                      {
-                        token: "variable.language",
-                        regex: /\$(-?\d+|#|!)/
-                      },
-                      {
-                        token: "string",
-                        regex: /\$(?!-?\d+|#|!)/
-                      },
+                        regex: ".",
+                        next: "start"
+                      }
+                    ],
+                    "macro_name": [
                       {
                         token: "def_macro",
-                        regex: /(?<=\[)(?:[^\[\]/\\\$]+)(?=[\/\]])/
-                      },
-                      {
-                        token: "constant.numeric",
-                        regex: /(?<=[\[\/])[-+]?(?:(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)j?|(?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)[+-](?:0b[01]+|0x[0-9A-Fa-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|inf|nan|NaN)j)(?=[\/\]])/
-                      },
-                      {
-                        token: "string",
-                        regex: /[^\[\]\/\\\$]+/
-                      },
-                  ],
-                  "escaped": [
-                    {
-                      token: "string",
-                      regex: ".",
-                      next: "start"
-                    }
-                  ],
-                  "macro_name": [
-                    {
-                      token: "def_macro",
-                      regex: /\s+[^\s]+/,
-                      next: "start"
-                    }
-                  ],
-              };
+                        regex: /\s+[^\s]+/,
+                        next: "start"
+                      }
+                    ],
+                };
+            };
+
+            oop.inherits(MacrosiaHighlight, TextHighlightRules);
+
+            let Mode = function() {
+                this.$tokenizer = new Tokenizer(new MacrosiaHighlight().$rules);
+                this.$behaviour = new CstyleBehaviour({ braces: true });
+                this.foldingRules = new FoldMode();
+            };
+
+            oop.inherits(Mode, TextMode);
+
+            (function() {
+                this.$id = "ace/mode/macrosia";
+            }).call(Mode.prototype);
+
+            exports.Mode = Mode;
+          });
+
+          editor = ace.edit("editor");
+          editor.setTheme("ace/theme/monokai");
+          editor.session.setMode("ace/mode/macrosia");
+          editor.setBehavioursEnabled(true);
+          editor.setOptions({
+            fontFamily: "JetBrains Mono",
+            fontSize: "16px",
+            wrap: true
+          });
+        } else {
+          let ed = document.getElementById("editor");
+          const content = ed.textContent;
+          ed.outerHTML = `<textarea id="editor">${ed.innerHTML}</textarea>`;
+          editor = {
+            getValue: () => ed.value,
+            setValue: (val, _i) => {
+              ed.value = content;
+            }
           };
-
-          oop.inherits(MacrosiaHighlight, TextHighlightRules);
-
-          let Mode = function() {
-              this.$tokenizer = new Tokenizer(new MacrosiaHighlight().$rules);
-              this.$behaviour = new CstyleBehaviour({ braces: true });
-              this.foldingRules = new FoldMode();
-          };
-
-          oop.inherits(Mode, TextMode);
-
-          (function() {
-              this.$id = "ace/mode/macrosia";
-          }).call(Mode.prototype);
-
-          exports.Mode = Mode;
-        });
-
-        editor = ace.edit("editor");
-        editor.setTheme("ace/theme/monokai");
-        editor.session.setMode("ace/mode/macrosia");
-        editor.setBehavioursEnabled(true);
-        editor.setOptions({
-          fontFamily: "JetBrains Mono",
-          fontSize: "16px",
-          wrap: true
-        });
+        }
 
         if (window.location.hash) {
           try {
