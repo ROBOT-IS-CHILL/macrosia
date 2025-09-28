@@ -342,13 +342,20 @@ def_macro! {
         Ok(Cow::Borrowed(b""))
     }
 
-    /// Loads a variable from the variable registry, or returns the second argument (or an empty string) if it doesn't exist.
+    /// Loads a variable from the variable registry, or sets it to and returns the second argument if it doesn't exist.
     /// # Arguments
     /// 1. The name of the variable to load.
     /// 2. The value to output if the variable does not exist.
     pub macro Get [b"get"] (name, default) + _x, v, _r {
+        let value = match v.load(&*name) {
+            Some(v) => v,
+            None => {
+                v.store(&*name, Cow::Borrowed(default));
+                &*default
+            }
+        };
         Ok(
-            Vec::from(v.load(&*name).unwrap_or(default)).into()
+            Vec::from(value).into()
         )
     }
 
