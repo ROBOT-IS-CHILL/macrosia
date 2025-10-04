@@ -143,22 +143,6 @@
 #define bar $1 + $1 = [add/$1/$1]
 [foo/1]
 
-Changes:
-
-[macro] <- returns a boolean instead
-[unixtime] <- ymmv on the precision due to js security features, otherwise unchanged
-[replace] <- uses rust regex, which doesn't support lookaheads or backreferences (all macros that use regex have this change)
-[base64.encode] <- uses url-safe base64
-[base64.decode] ^
-[zlib.compress] ^
-[zlib.decompress] ^
-
-Not implemented:
-
-[try] <- will not be implemented due to it being incompatible with the interruptible execution system
-[variables] <- nobody is using this so i'm not keeping it lol
-[json.*] <- nobody was using any of these macros
-
 Builtins:
 [tiles]
  Performs a search on the tile database, and returns the names of all tiles that match, separated by `/`.
