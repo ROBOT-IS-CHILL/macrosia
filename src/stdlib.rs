@@ -411,11 +411,8 @@ def_macro! {
     /// # Arguments
     /// 1. The value to check.
     pub macro IsNumber [b"is_number"] (value) + _x, _v, _r {
-        Ok(Cow::Owned(
-            Number::try_from(value)
-            .map(|v| format!("{v}").into_bytes())
-            .map_err(|e| format!("{e}").into_bytes())
-            .map_or_else(std::convert::identity, std::convert::identity)
+        Ok(Cow::Borrowed(
+            if Number::try_from(value).is_ok() {b"true"} else {b"false"}
         ))
     }
 
