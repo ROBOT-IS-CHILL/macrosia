@@ -2,7 +2,6 @@ use std::collections::TryReserveError;
 use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 
-use rand::{RngCore, SeedableRng};
 use rand_xoshiro::Xoshiro128PlusPlus;
 
 use crate::Cow;
