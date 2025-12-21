@@ -9,6 +9,7 @@ use itertools::Itertools as _;
 use rand::seq::SliceRandom as _;
 use rand::{Rng, SeedableRng};
 use regex::Regex;
+use std::i64;
 use std::io::prelude::*;
 use std::{
     borrow::Cow,
@@ -304,6 +305,39 @@ def_macro! {
         })
     }
 
+    /// Gets the sine of a number.
+    /// # Arguments
+    /// 1. The number.
+    pub macro Sine [b"sin"] (a) + _x, _v, _r {
+        Number::try_from(a).map(|v| match v {
+            Number::Integer(i) => Cow::Owned(format!("{}", Number::Float((i as f64).sin())).into_bytes()),
+            Number::Float(f) => Cow::Owned(format!("{}", Number::Float(f.sin())).into_bytes()),
+            Number::Complex(c) => Cow::Owned(format!("{}", Number::Complex(c.sin())).into_bytes()),
+        })
+    }
+
+    /// Gets the cosine of a number.
+    /// # Arguments
+    /// 1. The number.
+    pub macro Cosine [b"cos"] (a) + _x, _v, _r {
+        Number::try_from(a).map(|v| match v {
+            Number::Integer(i) => Cow::Owned(format!("{}", Number::Float((i as f64).cos())).into_bytes()),
+            Number::Float(f) => Cow::Owned(format!("{}", Number::Float(f.cos())).into_bytes()),
+            Number::Complex(c) => Cow::Owned(format!("{}", Number::Complex(c.cos())).into_bytes()),
+        })
+    }
+
+    /// Gets the tangent of a number.
+    /// # Arguments
+    /// 1. The number.
+    pub macro Tangent [b"tan"] (a) + _x, _v, _r {
+        Number::try_from(a).map(|v| match v {
+            Number::Integer(i) => Cow::Owned(format!("{}", Number::Float((i as f64).tan())).into_bytes()),
+            Number::Float(f) => Cow::Owned(format!("{}", Number::Float(f.tan())).into_bytes()),
+            Number::Complex(c) => Cow::Owned(format!("{}", Number::Complex(c.tan())).into_bytes()),
+        })
+    }
+
     /// Unescapes the argument.
     /// # Arguments
     /// 1. The string to unescape. Must be valid UTF-8.
@@ -531,7 +565,7 @@ def_macro! {
     /// Gets the byte length of a string.
     /// # Arguments
     /// 1. The string to get the length of.
-    pub macro ByteLength [b"blen"] (value) + _x, _v, _r {
+    pub macro ByteLength [b"byte.len"] (value) + _x, _v, _r {
         Ok(Cow::Owned(format!("{}", value.len()).into_bytes()))
     }
 
@@ -833,7 +867,7 @@ def_macro! {
         if end < start { Err("slice end cannot be less than start")? }
         if step == 0 { Err("cannot have a step size of 0")? }
         if step < 0 {
-            return Ok(Cow::Owned(haystack.chars().rev().skip(start as usize).take((end - start) as usize).step_by(step as usize).collect::<String>().into_bytes()));
+            return Ok(Cow::Owned(haystack.chars().rev().skip(start as usize).take((end - start) as usize).step_by((-step) as usize).collect::<String>().into_bytes()));
         }
         return Ok(Cow::Owned(haystack.chars().skip(start as usize).take((end - start) as usize).step_by(step as usize).collect::<String>().into_bytes()));
     }
@@ -844,7 +878,7 @@ def_macro! {
     /// 2? The slice start.
     /// 3? The slice end.
     /// 4? The slice step.
-    pub macro BSlice [b"bslice"] (haystack, ...args) + _x, _v, _r {
+    pub macro BSlice [b"byte.slice"] (haystack, ...args) + _x, _v, _r {
         let start = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
         let end = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
         let step = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
@@ -856,7 +890,7 @@ def_macro! {
         if end < start { Err("slice end cannot be less than start")? }
         if step == 0 { Err("cannot have a step size of 0")? }
         if step < 0 {
-            return Ok(Cow::Owned(haystack.iter().copied().rev().skip(start as usize).take((end - start) as usize).step_by(step as usize).collect::<Vec<u8>>()));
+            return Ok(Cow::Owned(haystack.iter().copied().rev().skip(start as usize).take((end - start) as usize).step_by((-step) as usize).collect::<Vec<u8>>()));
         }
         return Ok(Cow::Owned(haystack.iter().copied().skip(start as usize).take((end - start) as usize).step_by(step as usize).collect::<Vec<u8>>()));
     }
@@ -1086,7 +1120,7 @@ def_macro! {
     /// 1. The variable to index into.
     /// 2. The byte index in the variable. Must be greater than or equal to 0.
     /// 3. The value to set the byte to.
-    pub macro ByteSet [b"byteset"] (name, index, value) + _x, v, _r {
+    pub macro ByteSet [b"byte.set"] (name, index, value) + _x, v, _r {
         let buf = v.load_mut(&*name)
             .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
         let index = Number::try_from(index).map(i64::from)?;
@@ -1102,7 +1136,7 @@ def_macro! {
     /// # Arguments
     /// 1. The variable to index into.
     /// 2. The byte index in the variable. Must be greater than or equal to 0.
-    pub macro ByteGet [b"byteget"] (name, index) + _x, v, _r {
+    pub macro ByteGet [b"byte.get"] (name, index) + _x, v, _r {
         let buf = v.load(&*name)
             .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
         let index = Number::try_from(index).map(i64::from)?;
@@ -1117,7 +1151,7 @@ def_macro! {
     /// 2. The hexadecimal string splice into the byte.
     /// 3. The byte index to start in the variable. Must be greater than or equal to 0.
     /// 4? The byte index to end in the variable. Must be greater than or equal to 0. Defaults to the end of the string.
-    pub macro ByteSplice [b"bytesplice"] (name, value, start, ...iter) + _x, v, _r {
+    pub macro ByteSplice [b"byte.splice"] (name, value, start, ...iter) + _x, v, _r {
         let buf = v.load_mut(&*name)
             .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
 
@@ -1140,10 +1174,156 @@ def_macro! {
         buf.extend(suffix);
         Ok(Cow::Borrowed(b""))
     }
+
+    /// Calculates the binary AND of the given values. All values will be coerced to integers.
+    /// # Arguments
+    /// 1... The numbers to operate on.
+    pub macro BitAnd [b"bit.and"] (...args) + _x, _v, _r {
+        args
+            .map(|v| Number::try_from(&*v).map(i64::from))
+            .process_results(|it| {
+                Cow::Owned(format!("{}", it.fold(!0i64, |a, b| a & b)).into_bytes())
+            })
+    }
+
+    /// Calculates the binary OR of the given values. All values will be coerced to integers.
+    /// # Arguments
+    /// 1... The numbers to operate on.
+    pub macro BitOr [b"bit.or"] (...args) + _x, _v, _r {
+        args
+            .map(|v| Number::try_from(&*v).map(i64::from))
+            .process_results(|it| {
+                Cow::Owned(format!("{}", it.fold(0i64, |a, b| a | b)).into_bytes())
+            })
+    }
+
+    /// Calculates the binary XOR of the given values. All values will be coerced to integers.
+    /// # Arguments
+    /// 1... The numbers to operate on.
+    pub macro BitXor [b"bit.xor"] (...args) + _x, _v, _r {
+        args
+            .map(|v| Number::try_from(&*v).map(i64::from))
+            .process_results(|it| {
+                Cow::Owned(format!("{}", it.fold(0i64, |a, b| a ^ b)).into_bytes())
+            })
+    }
+
+    /// Calculates the binary NOT of the given values individually. All values will be coerced to integers.
+    /// # Arguments
+    /// 1... The numbers to operate on.
+    pub macro BitNot [b"bit.not"] (...args) + _x, _v, _r {
+        args
+            .map(|v| Number::try_from(&*v).map(i64::from))
+            .process_results(|it| {
+                Cow::Owned(it.map(|v| format!("{}", (!v))).join("/").into_bytes())
+            })
+    }
+
+    /// Calculates the left bit shift of the given value. All values will be coerced to integers.
+    /// # Arguments
+    /// 1. The number to shift.
+    /// 2. The amount to shift by. Must be in the range of 0 to 63, inclusive.
+    pub macro BitLShift [b"bit.shl"] (value, amount) + _x, _v, _r {
+        let value = Number::try_from(value).map(i64::from)?;
+        let amount = Number::try_from(amount).map(i64::from)?;
+        if !(0..=63).contains(&amount) { return Err("shift amount must be in range 0 ..= 63")? }
+        Ok(Cow::Owned(format!("{}", value.unbounded_shl(amount as u32)).into_bytes()))
+    }
+
+    /// Calculates the arithmetic right bit shift of the given value. All values will be coerced to integers.
+    /// # Arguments
+    /// 1. The number to shift.
+    /// 2. The amount to shift by. Must be in the range of 0 to 63, inclusive.
+    pub macro BitARShift [b"bit.ashr"] (value, amount) + _x, _v, _r {
+        let value = Number::try_from(value).map(i64::from)?;
+        let amount = Number::try_from(amount).map(i64::from)?;
+        if !(0..=63).contains(&amount) { return Err("shift amount must be in range 0 ..= 63")? }
+        Ok(Cow::Owned(format!("{}", value.unbounded_shr(amount as u32)).into_bytes()))
+    }
+
+    /// Calculates the logical right bit shift of the given value. All values will be coerced to integers.
+    /// # Arguments
+    /// 1. The number to shift.
+    /// 2. The amount to shift by. Must be in the range of 0 to 63, inclusive.
+    pub macro BitLRShift [b"bit.lshr"] (value, amount) + _x, _v, _r {
+        let value = Number::try_from(value).map(i64::from)?;
+        let amount = Number::try_from(amount).map(i64::from)?;
+        if !(0..=63).contains(&amount) { return Err("shift amount must be in range 0 ..= 63")? }
+        Ok(Cow::Owned(format!("{}", (value as u64).unbounded_shr(amount as u32) as i64).into_bytes()))
+    }
+
+    /// Checks if the given input value to a text macro was used.
+    /// # Arguments
+    /// 1. The value to check.
+    pub macro Input [b"input"] (value) + _x, _v, _r {
+        if value.len() >= 2 && (matches!(value, b"$!" | b"$#") || 
+            str::from_utf8(&value[1..]).map_err(|_| ()).and_then(|v| str::parse::<u64>(v).map_err(|_| ())).is_ok())
+        {
+            Ok(Cow::Borrowed(b"false"))
+        } else {
+            Ok(Cow::Borrowed(b"true"))
+        }
+    }
+
+    /// Interpolates a value using a given time and easing method.
+    /// 
+    /// Supported easings:
+    /// `back`, `bounce`, `circ`, `elastic`, `expo`, `sine`, `quad`, `cubic`, `quart`, `quint`, `linear`
+    /// 
+    /// All easings except for `linear` must be followed by `_in`, `_out`, or `_in_out`.
+    /// 
+    /// For more information, see https://easings.net/.
+    /// 
+    /// # Arguments
+    /// 1. The number at the start of the easing animation.
+    /// 2. The number at the end of the easing animation.
+    /// 3. The time the easing animation should calculate.
+    /// 4. The easing animation kind.
+    pub macro Ease [b"ease"] (start, end, t, kind) + _x, _v, _r {
+        let start = Number::try_from(start)?;
+        let end = Number::try_from(end)?;
+        let t = Number::try_from(t)?;
+        let easing_function: fn(f32) -> f32 = match kind {
+            b"back_in" => simple_easing::back_in,
+            b"back_in_out" => simple_easing::back_in_out,
+            b"back_out" => simple_easing::back_out,
+            b"bounce_in" => simple_easing::bounce_in,
+            b"bounce_in_out" => simple_easing::bounce_in_out,
+            b"bounce_out" => simple_easing::bounce_out,
+            b"circ_in" => simple_easing::circ_in,
+            b"circ_in_out" => simple_easing::circ_in_out,
+            b"circ_out" => simple_easing::circ_out,
+            b"cubic_in" => simple_easing::cubic_in,
+            b"cubic_in_out" => simple_easing::cubic_in_out,
+            b"cubic_out" => simple_easing::cubic_out,
+            b"elastic_in" => simple_easing::elastic_in,
+            b"elastic_in_out" => simple_easing::elastic_in_out,
+            b"elastic_out" => simple_easing::elastic_out,
+            b"expo_in" => simple_easing::expo_in,
+            b"expo_in_out" => simple_easing::expo_in_out,
+            b"expo_out" => simple_easing::expo_out,
+            b"linear" => simple_easing::linear,
+            b"quad_in" => simple_easing::quad_in,
+            b"quad_in_out" => simple_easing::quad_in_out,
+            b"quad_out" => simple_easing::quad_out,
+            b"quart_in" => simple_easing::quart_in,
+            b"quart_in_out" => simple_easing::quart_in_out,
+            b"quart_out" => simple_easing::quart_out,
+            b"quint_in" => simple_easing::quint_in,
+            b"quint_in_out" => simple_easing::quint_in_out,
+            b"quint_out" => simple_easing::quint_out,
+            b"sine_in" => simple_easing::sine_in,
+            b"sine_in_out" => simple_easing::sine_in_out,
+            b"sine_out" => simple_easing::sine_out,
+            other => return Err(format!("unsupported easing mode: {}", String::from_utf8_lossy(other)))?
+        };
+        let mul = easing_function(f64::from(t) as f32);
+        let interpolated = start * Number::Float((1.0 - mul) as f64) + end * Number::Float(mul as f64);
+        Ok(Cow::Owned(format!("{}", interpolated).into_bytes()))
+    }
 }
 
 /// Static block of bytes that can be used to turn a `u8` into a `&'static u8`.
-/// Because fuck it, why not.
 pub(crate) static BYTES: [u8; 256] = [
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
     0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,

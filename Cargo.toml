@@ -1,6 +1,6 @@
 [package]
 name = "macrosia"
-version = "0.2.5"
+version = "0.3.0"
 edition = "2024"
 
 [dependencies]
@@ -17,6 +17,7 @@ getrandom = { version = "0.3.3", features = ["wasm_js"], optional = true }
 flate2 = { version = "1.0.17", features = ["zlib-rs"], default-features = false }
 aho-corasick = "1"
 rand_xoshiro = "0.7"
+simple-easing = "1"
 
 [features]
 default = []

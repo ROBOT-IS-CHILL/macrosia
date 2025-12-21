@@ -41,7 +41,7 @@ fn parse_number(mut value: &[u8]) -> Result<Number, MacroError> {
     macro_rules! impl_intpref {
         ($lit: literal, $base: literal) => {
             if value.starts_with($lit) {
-                return str::from_utf8(&value)
+                return str::from_utf8(&value[2..])
                     .map_err(|_| MacroError::from("string is not valid UTF-8"))
                     .and_then(|v| {
                         i64::from_str_radix(v, $base).map_err(|e| MacroError::from(format!("{e}")))
@@ -101,8 +101,12 @@ impl std::fmt::Display for Number {
             Self::Integer(x) => write!(f, "{x}"),
             Self::Float(x) if x.fract() == 0.0 => write!(f, "{x:.0}"),
             Self::Float(x) => write!(f, "{x}"),
-            Self::Complex(c) if c.im.is_sign_positive() => write!(f, "{}+{}j", c.re, c.im),
-            Self::Complex(c) => write!(f, "{}-{}j", c.re, c.im),
+            Self::Complex(c) => {
+                if c.is_nan() { write!(f, "nan+nanj") }
+                else if c.re == 0.0 { write!(f, "{}j", c.im) }
+                else if c.im == 0.0 { write!(f, "{}", c.re) }
+                else { write!(f, "{}{:+}j", c.re, c.im) }
+            }
         }
     }
 }
