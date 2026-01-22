@@ -1323,7 +1323,53 @@ def_macro! {
     }
 
     /// Parses a RPN expression and saves it to a function variable.
-    /// See the documentation for [expr].
+    ///
+    /// # Syntax
+    /// Expressions are defined using Reverse Polish Notation.
+    /// For example, `1 2 +` -> `3`.
+    /// 
+    /// Each operator or number (generally called a _node_) must be
+    /// separated by at least one whitespace character.
+    /// Also supported is the node `$N`, for input values, and
+    /// `#<ident>`, which allows calling other expressions inside of an expression.
+    /// 
+    /// Calling an expression will pop its required arguments from the stack.
+    /// For example, `[expr.def/inc/1 +][expr.call/inc/5]` -> `6`.
+    /// ## Supported Operators
+    /// - `**`: Exponent
+    /// - `log`: Log of arg 1 with base of arg 2
+    /// - `abs`: Absolute value
+    /// - `<=>`: Three-way comparison
+    /// - `!=`: Not equal
+    /// - `==`: Equal
+    /// - `<=`: Less or equal
+    /// - `>=`: Greater or equal
+    /// - `<<`: Left shift
+    /// - `>>`: Logical right shift
+    /// - `>>>`: Arithmetic right shift
+    /// - `<`: Less
+    /// - `>`: Greater
+    /// - `+`: Add
+    /// - `-`: Subtract
+    /// - `*`: Multiply
+    /// - `/`: Divide
+    /// - `%`: Modulus
+    /// - `~`: Negate
+    /// - `?`: Ternary (if first argument is nonzero, choose first argument, otherwise choose second argument)
+    /// - `&`: Bitwise AND
+    /// - `|`: Bitwise OR
+    /// - `^`: Bitwise XOR
+    /// - `!`: Bitwise NOT
+    /// - `sin`: Sine
+    /// - `cos`: Cosine
+    /// - `tan`: Tangent
+    /// - `asin`: Arcsine
+    /// - `acos`: Arccosine
+    /// - `atan`: Arctangent
+    /// - `real`: Real component of complex number
+    /// - `imag`: Imaginary component of complex number
+    /// - `arg`: Argument of complex number
+    ///
     /// # Arguments
     /// 1. The name to save the expression under.
     /// 2... The expression
@@ -1342,6 +1388,16 @@ def_macro! {
         let expr = v.load_fn(name).ok_or("expression is undefined")?;
         let args = args.map(|v| Number::try_from(&*v)).collect::<Result<Vec<_>, _>>()?;
         let res = expr.exec(&args, &*v, &name)?;
+        Ok(Cow::Owned(format!("{res}").into_bytes()))
+    }
+
+    /// Evaluates an RPN expression. See [expr.def].
+    /// # Arguments
+    /// 1... The expression.
+    pub macro ExprDef [b"expr.def"] (...value) + _x, v, _r {
+        let expr_str = value.flatten().intersperse(&b'/').copied().collect::<Vec<u8>>();
+        let expr = ExpressionFunction::parse(&expr_str)?;
+        let res = expr.exec(&[], &*v, &name)?;
         Ok(Cow::Owned(format!("{res}").into_bytes()))
     }
 }
