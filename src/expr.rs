@@ -1,5 +1,6 @@
 use crate::{number, Number, MacroError, VariableRegistry};
 use num_complex::Complex64;
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 enum Node {
@@ -104,31 +105,33 @@ pub struct ExpressionFunction {
 enum StackEntry {
 	FuncCall {
 		name: Vec<u8>,
-		args: Vec<StackEntry>
+		args: Vec<Rc<StackEntry>>
 	},
 	Operation {
 		operator: Operator,
-		args: Vec<StackEntry>
+		args: Vec<Rc<StackEntry>>
 	},
 	Literal(Number)
 }
 impl StackEntry {
-	fn eval(self, var: &VariableRegistry, depth: usize, name: &[u8]) -> Result<Number, MacroError> {
+	fn eval(&self, var: &VariableRegistry, depth: usize, name: &[u8]) -> Result<Number, MacroError> {
 		const DEPTH_LIMIT: usize = 1024;
 		if depth > DEPTH_LIMIT {
 			return Err(format!("in {}: function call depth limit of {DEPTH_LIMIT} exceeded", String::from_utf8_lossy(name)))?;
 		}
 		match self {
-			Self::Operation { operator, mut args } => 
-				operator.eval(&mut args, var, depth, name).ok_or_else(|| format!("in {}: operator has not enough args past check, should never happen", String::from_utf8_lossy(name)).into()),
+			Self::Operation { operator, args } => {
+				let mut args = args.clone();
+				operator.eval(&mut args, var, depth, name).ok_or_else(|| format!("in {}: operator has not enough args past check, should never happen", String::from_utf8_lossy(name)).into())
+			}
 			Self::FuncCall { name: child, args } => {
 				let func = var.load_fn(&child).ok_or_else(|| format!("in {}: function with name {} does not exist", String::from_utf8_lossy(name), String::from_utf8_lossy(&child)))?;
-				let mut stack = Vec::<StackEntry>::new();
+				let mut stack = Vec::<Rc<StackEntry>>::new();
 				func._exec(&mut stack, &args, var, &child)?;
 				stack.pop().ok_or_else(|| format!("in {}: stack was empty at end of function", String::from_utf8_lossy(name)))?
 					.eval(var, depth + 1, &child)
 			}
-			Self::Literal(num) => Ok(num)
+			Self::Literal(num) => Ok(*num)
 		}
 	}
 }
@@ -155,12 +158,12 @@ impl ExpressionFunction {
 	#[inline]
 	pub(crate) fn exec(&self, args: &[Number], reg: &VariableRegistry, name: &[u8]) -> Result<Number, MacroError> {
 		let mut stack = Vec::new();
-		self._exec(&mut stack, args.iter().map(|v| StackEntry::Literal(*v)).rev().collect::<Vec<_>>().as_slice(), reg, name)?;
+		self._exec(&mut stack, args.iter().map(|v| Rc::new(StackEntry::Literal(*v))).rev().collect::<Vec<_>>().as_slice(), reg, name)?;
 		let res = stack.pop().ok_or_else(|| format!("in {}: stack empty", String::from_utf8_lossy(name)))?;
 		res.eval(reg, 0, name)
 	}
 
-	fn _exec(&self, stack: &mut Vec<StackEntry>, args: &[StackEntry], reg: &VariableRegistry, name: &[u8]) -> Result<(), MacroError> {
+	fn _exec(&self, stack: &mut Vec<Rc<StackEntry>>, args: &[Rc<StackEntry>], reg: &VariableRegistry, name: &[u8]) -> Result<(), MacroError> {
 		if self.arg_count != args.len() as u32 {
 			return Err(format!("in {}: function takes {} arguments, {} given", String::from_utf8_lossy(name), self.arg_count, args.len()))?;
 		}
@@ -171,7 +174,7 @@ impl ExpressionFunction {
 						return Err(format!("in {}: operator {opr:?} not given enough arguments (expected {})", String::from_utf8_lossy(name), opr.argument_count()))?;
 					}
 					let args = stack.split_off(stack.len() - (opr.argument_count() as usize));
-					stack.push(StackEntry::Operation { operator: *opr, args });
+					stack.push(Rc::new(StackEntry::Operation { operator: *opr, args }));
 				},
 				Node::Input(number) => {
 					if *number > self.arg_count {
@@ -181,7 +184,7 @@ impl ExpressionFunction {
 					stack.push(val.clone());
 				},
 				Node::Number(num) => {
-					stack.push(StackEntry::Literal(*num));
+					stack.push(Rc::new(StackEntry::Literal(*num)));
 				},
 				Node::FuncCall(fun) => {
 					let func = reg.load_fn(&fun).ok_or_else(|| format!("in {}: function with name {} does not exist", String::from_utf8_lossy(name), String::from_utf8_lossy(fun)))?;
@@ -189,7 +192,7 @@ impl ExpressionFunction {
 						return Err(format!("in {}: function {} takes {} arguments, {} given", String::from_utf8_lossy(name), String::from_utf8_lossy(fun), func.arg_count, stack.len()))?;
 					}
 					let args = stack.split_off(stack.len() - (func.arg_count as usize)).into_iter().rev().collect::<Vec<_>>();
-					stack.push(StackEntry::FuncCall { name: fun.to_vec(), args });
+					stack.push(StackEntry::FuncCall { name: fun.to_vec(), args }.into());
 				}
 			}
 		}
@@ -198,7 +201,7 @@ impl ExpressionFunction {
 }
 
 impl Operator {
-	fn eval(&self, stack: &mut Vec<StackEntry>, var: &VariableRegistry, depth: usize, name: &[u8]) -> Option<Number> {
+	fn eval(&self, stack: &mut Vec<Rc<StackEntry>>, var: &VariableRegistry, depth: usize, name: &[u8]) -> Option<Number> {
 		use self::*;
 		macro_rules! spop {
 			() => { stack.pop()?.eval(var, depth + 1, name).ok()? }
