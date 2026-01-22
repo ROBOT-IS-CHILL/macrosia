@@ -122,7 +122,7 @@ impl StackEntry {
 		match self {
 			Self::Operation { operator, args } => {
 				let mut args = args.clone();
-				operator.eval(&mut args, var, depth, name).ok_or_else(|| format!("in {}: operator has not enough args past check, should never happen", String::from_utf8_lossy(name)).into())
+				operator.eval(&mut args, var, depth, name)
 			}
 			Self::FuncCall { name: child, args } => {
 				let func = var.load_fn(&child).ok_or_else(|| format!("in {}: function with name {} does not exist", String::from_utf8_lossy(name), String::from_utf8_lossy(&child)))?;
@@ -201,12 +201,13 @@ impl ExpressionFunction {
 }
 
 impl Operator {
-	fn eval(&self, stack: &mut Vec<Rc<StackEntry>>, var: &VariableRegistry, depth: usize, name: &[u8]) -> Option<Number> {
+	fn eval(&self, stack: &mut Vec<Rc<StackEntry>>, var: &VariableRegistry, depth: usize, name: &[u8]) -> Result<Number, MacroError> {
 		use self::*;
+		let stack_len = stack.len();
 		macro_rules! spop {
-			() => { stack.pop()?.eval(var, depth + 1, name).ok()? }
+			() => { stack.pop().ok_or_else(|| format!("in {}: operator does not have enough arguments (expected {}, got {})", String::from_utf8_lossy(name), self.argument_count(), stack_len))?.eval(var, depth + 1, name)? }
 		}
-		Some(match self {
+		Ok(match self {
 			Self::Add => spop!() + spop!(),
 			Self::Sub => {let [b, a] = [spop!(), spop!()]; a - b},
 			Self::Mul => spop!() * spop!(),
