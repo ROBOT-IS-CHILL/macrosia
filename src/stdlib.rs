@@ -1256,7 +1256,7 @@ def_macro! {
     /// # Arguments
     /// 1. The value to check.
     pub macro Input [b"input"] (value) + _x, _v, _r {
-        if value.len() >= 2 && (matches!(value, b"$!" | b"$#") || 
+        if value.len() >= 2 && value[0] == '$' && (matches!(value, b"$!" | b"$#") ||
             str::from_utf8(&value[1..]).map_err(|_| ()).and_then(|v| str::parse::<u64>(v).map_err(|_| ())).is_ok())
         {
             Ok(Cow::Borrowed(b"false"))
