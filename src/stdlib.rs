@@ -1321,6 +1321,18 @@ def_macro! {
         let interpolated = start * Number::Float((1.0 - mul) as f64) + end * Number::Float(mul as f64);
         Ok(Cow::Owned(format!("{}", interpolated).into_bytes()))
     }
+
+    /// Parses a RPN expression and saves it to a function variable.
+    /// See the documentation for [expr].
+    /// # Arguments
+    /// 1. The name to save the expression under.
+    /// 2... The expression
+    pub macro ExprStore [b"expr.store"] (name, ...value) + _x, v, _r {
+        let expr_str = value.join(b"/");
+        let expr = ExpressionFunction::parse(expr_str)?;
+        v.store_fn(expr);
+        Ok(Cow::Borrowed(b""))
+    }
 }
 
 /// Static block of bytes that can be used to turn a `u8` into a `&'static u8`.
