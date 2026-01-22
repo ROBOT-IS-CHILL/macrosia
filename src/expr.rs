@@ -85,7 +85,7 @@ impl Node {
 		}
 		if let Some(s) = string.strip_prefix(b"#") {
 			string = s;
-			if !string.iter().all(|c| c.is_ascii_alphanumeric() || *c == '_') { return None; }
+			if !string.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'_') { return None; }
 			let ident = str::from_utf8(string).ok()?;
 			return Some(Node::FuncCall(ident.into()));
 		} 
@@ -121,7 +121,7 @@ impl ExpressionFunction {
 	pub(crate) fn exec(&self, args: &[Number], reg: &VariableRegistry, name: &[u8]) -> Result<Number, MacroError> {
 		let mut stack = Vec::new();
 		self._exec(&mut stack, args.iter().map(|v| *v).rev().collect::<Vec<_>>().as_slice(), reg, name, 0)?;
-		stack.pop().ok_or_else(|| format!("in {}: stack empty", String::from_utf8_lossy(name)))
+		stack.pop().ok_or_else(|| format!("in {}: stack empty", String::from_utf8_lossy(name)).into())
 	}
 
 	fn _exec(&self, stack: &mut Vec<Number>, args: &[Number], reg: &VariableRegistry, name: &[u8], depth: u32) -> Result<(), MacroError> {
@@ -129,7 +129,7 @@ impl ExpressionFunction {
 		if depth > DEPTH_LIMIT {
 			return Err(format!("in {}: function call depth limit of {DEPTH_LIMIT} exceeded", String::from_utf8_lossy(name)))?;
 		}
-		if self.arg_count != args.len() {
+		if self.arg_count != args.len() as u32 {
 			return Err(format!("in {}: args.len() != self.arg_count (this should never happen)", String::from_utf8_lossy(name)))?;
 		}
 		for node in &self.nodes {
@@ -153,7 +153,7 @@ impl ExpressionFunction {
 					if stack.len() < func.arg_count as usize {
 						return Err(format!("in {}: function {} takes {} arguments, {} given", String::from_utf8_lossy(name), String::from_utf8_lossy(fun), func.arg_count, stack.len()))?;
 					}
-					let args = stack.split_off(stack.len() - (func.arg_count as usize)).into_iter().rev().collect();
+					let args = stack.split_off(stack.len() - (func.arg_count as usize)).into_iter().rev().collect::<Vec<_>>();
 					func._exec(stack, &args, reg, fun, depth + 1)?;
 				}
 			}

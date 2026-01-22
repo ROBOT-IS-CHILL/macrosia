@@ -1,6 +1,6 @@
 //! Defines some basic macros for regular use.
 
-use crate::{Macro, MacroError, Number, var_reg::VariableRegistry};
+use crate::{Macro, MacroError, Number, var_reg::VariableRegistry, expr::ExpressionFunction};
 use aho_corasick::AhoCorasick;
 use base64::Engine;
 use const_format::concatcp;
@@ -1126,8 +1126,8 @@ def_macro! {
         let index = Number::try_from(index).map(i64::from)?;
         let index = usize::try_from(index).map_err(|_| "invalid index")?;
         let byte = buf.get_mut(index).ok_or("index out of bounds")?;
-        let value = Number::try_from(index).map(i64::from)?;
-        let value = u8::try_from(index).map_err(|_| "invalid byte")?;
+        let value = Number::try_from(value).map(i64::from)?;
+        let value = u8::try_from(value).map_err(|_| "invalid byte")?;
         *byte = value;
         Ok(Cow::Borrowed(b""))
     }
@@ -1256,7 +1256,7 @@ def_macro! {
     /// # Arguments
     /// 1. The value to check.
     pub macro Input [b"input"] (value) + _x, _v, _r {
-        if value.len() >= 2 && value[0] == '$' && (matches!(value, b"$!" | b"$#") ||
+        if value.len() >= 2 && value[0] == b'$' && (matches!(value, b"$!" | b"$#") ||
             str::from_utf8(&value[1..]).map_err(|_| ()).and_then(|v| str::parse::<u64>(v).map_err(|_| ())).is_ok())
         {
             Ok(Cow::Borrowed(b"false"))
@@ -1327,11 +1327,22 @@ def_macro! {
     /// # Arguments
     /// 1. The name to save the expression under.
     /// 2... The expression
-    pub macro ExprStore [b"expr.store"] (name, ...value) + _x, v, _r {
-        let expr_str = value.join(b"/");
-        let expr = ExpressionFunction::parse(expr_str)?;
-        v.store_fn(expr);
+    pub macro ExprDef [b"expr.def"] (name, ...value) + _x, v, _r {
+        let expr_str = value.flatten().intersperse(&b'/').copied().collect::<Vec<u8>>();
+        let expr = ExpressionFunction::parse(&expr_str)?;
+        v.store_fn(name, expr);
         Ok(Cow::Borrowed(b""))
+    }
+
+    /// Evaluates a stored RPN expression.
+    /// # Arguments
+    /// 1. The name of the expression to call.
+    /// 2... The expression arguments. Must all be numbers.
+    pub macro ExprCall [b"expr.call"] (name, ...args) + _x, v, _r {
+        let expr = v.load_fn(name).ok_or("expression is undefined")?;
+        let args = args.map(|v| Number::try_from(&*v)).collect::<Result<Vec<_>, _>>()?;
+        let res = expr.exec(&args, &*v, &name)?;
+        Ok(Cow::Owned(format!("{res}").into_bytes()))
     }
 }
 
