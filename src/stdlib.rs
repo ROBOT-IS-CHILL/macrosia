@@ -1374,7 +1374,7 @@ def_macro! {
     /// 1. The name to save the expression under.
     /// 2... The expression
     pub macro ExprDef [b"expr.def"] (name, ...value) + _x, v, _r {
-        let expr_str = value.flatten().intersperse(&b'/').copied().collect::<Vec<u8>>();
+        let expr_str = value.intersperse(b"/").flatten().copied().collect::<Vec<u8>>();
         let expr = ExpressionFunction::parse(&expr_str)?;
         v.store_fn(name, expr);
         Ok(Cow::Borrowed(b""))
@@ -1395,7 +1395,7 @@ def_macro! {
     /// # Arguments
     /// 1... The expression.
     pub macro Expr [b"expr"] (...value) + _x, v, _r {
-        let expr_str = value.flatten().intersperse(&b'/').copied().collect::<Vec<u8>>();
+        let expr_str = value.intersperse(b"/").flatten().copied().collect::<Vec<u8>>();
         let expr = ExpressionFunction::parse(&expr_str)?;
         let res = expr.exec(&[], &*v, b"<inline>")?;
         Ok(Cow::Owned(format!("{res}").into_bytes()))
