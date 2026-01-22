@@ -2,6 +2,11 @@ use crate::{number, Number, MacroError, VariableRegistry};
 use num_complex::Complex64;
 use std::rc::Rc;
 
+const DEPTH_LIMIT: usize = 1024;
+const STEP_LIMIT: usize = 1024 * 1024 * 16;
+const RED_ZONE: usize = 16 * 1024;
+const STACK_SIZE: usize = 256 * 1024;
+
 #[derive(Debug, Clone)]
 enum Node {
 	Operator(Operator),
@@ -114,22 +119,29 @@ enum StackEntry {
 	Literal(Number)
 }
 impl StackEntry {
-	fn eval(&self, var: &VariableRegistry, depth: usize, name: &[u8]) -> Result<Number, MacroError> {
-		const DEPTH_LIMIT: usize = 1024;
+	fn eval(&self, var: &VariableRegistry, depth: usize, name: &[u8], steps: &mut usize) -> Result<Number, MacroError> {
 		if depth > DEPTH_LIMIT {
 			return Err(format!("in {}: function call depth limit of {DEPTH_LIMIT} exceeded", String::from_utf8_lossy(name)))?;
 		}
+		if *steps > STEP_LIMIT {
+			return Err(format!("in {}: step limit of {STEP_LIMIT} exceeded", String::from_utf8_lossy(name)))?;
+		}
+		*steps += 1;
 		match self {
 			Self::Operation { operator, args } => {
 				let mut args = args.clone();
-				operator.eval(&mut args, var, depth, name)
+				stacker::maybe_grow(RED_ZONE, STACK_SIZE, ||
+					operator.eval(&mut args, var, depth + 1, name, steps)
+				)
 			}
 			Self::FuncCall { name: child, args } => {
 				let func = var.load_fn(&child).ok_or_else(|| format!("in {}: function with name {} does not exist", String::from_utf8_lossy(name), String::from_utf8_lossy(&child)))?;
 				let mut stack = Vec::<Rc<StackEntry>>::new();
 				func._exec(&mut stack, &args, var, &child)?;
-				stack.pop().ok_or_else(|| format!("in {}: stack was empty at end of function", String::from_utf8_lossy(name)))?
-					.eval(var, depth + 1, &child)
+				let ret = stack.pop().ok_or_else(|| format!("in {}: stack was empty at end of function", String::from_utf8_lossy(name)))?;
+				stacker::maybe_grow(RED_ZONE, STACK_SIZE, ||
+					ret.eval(var, depth + 1, &child, steps)
+				)
 			}
 			Self::Literal(num) => Ok(*num)
 		}
@@ -160,7 +172,7 @@ impl ExpressionFunction {
 		let mut stack = Vec::new();
 		self._exec(&mut stack, args.iter().map(|v| Rc::new(StackEntry::Literal(*v))).rev().collect::<Vec<_>>().as_slice(), reg, name)?;
 		let res = stack.pop().ok_or_else(|| format!("in {}: stack empty", String::from_utf8_lossy(name)))?;
-		res.eval(reg, 0, name)
+		res.eval(reg, 0, name, &mut 0)
 	}
 
 	fn _exec(&self, stack: &mut Vec<Rc<StackEntry>>, args: &[Rc<StackEntry>], reg: &VariableRegistry, name: &[u8]) -> Result<(), MacroError> {
@@ -201,11 +213,12 @@ impl ExpressionFunction {
 }
 
 impl Operator {
-	fn eval(&self, stack: &mut Vec<Rc<StackEntry>>, var: &VariableRegistry, depth: usize, name: &[u8]) -> Result<Number, MacroError> {
+	fn eval(&self, stack: &mut Vec<Rc<StackEntry>>, var: &VariableRegistry, depth: usize, name: &[u8], steps: &mut usize) -> Result<Number, MacroError> {
 		use self::*;
 		let stack_len = stack.len();
 		macro_rules! spop {
-			() => { stack.pop().ok_or_else(|| format!("in {}: operator does not have enough arguments (expected {}, got {})", String::from_utf8_lossy(name), self.argument_count(), stack_len))?.eval(var, depth + 1, name)? }
+			() => { stack.pop().ok_or_else(|| format!("in {}: operator does not have enough arguments (expected {}, got {})", String::from_utf8_lossy(name), self.argument_count(), stack_len))?.eval(var, depth, name, steps)? };
+			(lazy) => { stack.pop().ok_or_else(|| format!("in {}: operator does not have enough arguments (expected {}, got {})", String::from_utf8_lossy(name), self.argument_count(), stack_len))? }
 		}
 		Ok(match self {
 			Self::Add => spop!() + spop!(),
@@ -229,19 +242,23 @@ impl Operator {
 				)
 			},
 			Self::Tern => {
-				let falsy = spop!();
-			    let truthy = spop!();
+				let falsy = spop!(lazy);
+			    let truthy = spop!(lazy);
 			    let cond = spop!();
-				if cond == Number::ZERO { falsy } else { truthy }
+				if cond == Number::ZERO { falsy.eval(var, depth, name, steps)? } else { truthy.eval(var, depth, name, steps)? }
 			},
 			Self::And => Number::Integer(i64::from(spop!()) & i64::from(spop!())),
 			Self::Or => Number::Integer(i64::from(spop!()) | i64::from(spop!())),
 			Self::LogicAnd => {
-				if spop!() == Number::ZERO { Number::Integer(0) }
-				else { Number::Integer(if spop!() == Number::ZERO { 0 } else { 1 }) }
+				let left = spop!();
+				let right = spop!(lazy);
+				if left == Number::ZERO { Number::Integer(0) }
+				else { Number::Integer(if right.eval(var, depth, name, steps)? == Number::ZERO { 0 } else { 1 }) }
 			},
 			Self::LogicOr => {
-				if spop!() == Number::ZERO { Number::Integer(if spop!() == Number::ZERO { 0 } else { 1 }) }
+				let left = spop!();
+				let right = spop!(lazy);
+				if left == Number::ZERO { Number::Integer(if right.eval(var, depth, name, steps)? == Number::ZERO { 0 } else { 1 }) }
 				else { Number::Integer(1) }
 			},
 			Self::Xor => Number::Integer(i64::from(spop!()) ^ i64::from(spop!())),
@@ -306,4 +323,27 @@ fn nodetest() -> Result<(), Box<dyn std::error::Error>> {
 	assert_eq!(Number::Float(0.25), func.exec(&[], &VariableRegistry::new(), b"<test>")?);
 
 	Ok(())
+}
+
+#[test]
+fn rectest() -> Result<(), Box<dyn std::error::Error>> {
+	let string = b"
+		[expr.def/fib/$1 2 < $1 $1 1 - #fib $1 2 - #fib + ?]
+		[expr.call/fib/10]
+		[expr.call/fib/20]
+
+		[expr.def/inf/1 #inf +]
+		[expr.def/lazy_test/1 1 > #inf 42 ?]
+		[expr.call/lazy_test]
+	";
+
+	static KILL_MACROS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    let mut exec = crate::Executor::new(b't');
+    exec.add_stdlib();
+    let mut reg = VariableRegistry::new();
+    let mut func = exec.evaluate(string, &mut reg, None, None, &KILL_MACROS);
+    let out = loop { if let Some(v) = func() { break v; } }?;
+    println!("{}", String::from_utf8_lossy(&out));
+    Ok(())
 }
