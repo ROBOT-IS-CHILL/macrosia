@@ -13,7 +13,7 @@ enum Node {
 enum Operator {
 	Add, Sub, Mul, Div, Mod, Neg,
 	Less, Leq, Great, Geq, Eq, Neq, Cmp, Tern,
-	And, Or, Xor, Not, Shl, Shr, AShr,
+	LogicAnd, LogicOr, And, Or, Xor, Not, Shl, Shr, AShr,
 	Pow, Log, Abs,
 	Sin, Cos, Tan, Asin, Acos, Atan,
 	Real, Imag, Arg
@@ -25,7 +25,7 @@ impl Operator {
 		match self {
 			Add | Sub | Mul | Div | Mod |
 			Less | Leq | Great | Geq | Eq | Neq | Cmp |
-			And | Or | Xor | Shl | Shr | AShr |
+			LogicAnd | LogicOr | And | Or | Xor | Shl | Shr | AShr |
 			Pow | Log => 2,
 			Tern => 3,
 			_ => 1
@@ -54,6 +54,8 @@ impl Operator {
 			b"%" => Mod,
 			b"~" => Neg,
 			b"?" => Tern,
+			b"&&" => LogicAnd,
+			b"||" => LogicOr,
 			b"&" => And,
 			b"|" => Or,
 			b"^" => Xor,
@@ -230,6 +232,14 @@ impl Operator {
 			},
 			Self::And => Number::Integer(i64::from(spop!()) & i64::from(spop!())),
 			Self::Or => Number::Integer(i64::from(spop!()) | i64::from(spop!())),
+			Self::LogicAnd => {
+				if spop!() == Number::ZERO { Number::Integer(0) }
+				else { Number::Integer(if spop!() == Number::ZERO { 0 } else { 1 }) }
+			},
+			Self::LogicOr => {
+				if spop!() == Number::ZERO { Number::Integer(if spop!() == Number::ZERO { 0 } else { 1 }) }
+				else { Number::Integer(1) }
+			},
 			Self::Xor => Number::Integer(i64::from(spop!()) ^ i64::from(spop!())),
 			Self::Not => Number::Integer(!i64::from(spop!())),
 			Self::Shl => {let [b, a] = [spop!(), spop!()]; Number::Integer(i64::from(a) << ((i64::from(b) as u64) % 64))},
