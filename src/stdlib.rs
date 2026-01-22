@@ -1126,9 +1126,9 @@ def_macro! {
         let index = Number::try_from(index).map(i64::from)?;
         let index = usize::try_from(index).map_err(|_| "invalid index")?;
         let byte = buf.get_mut(index).ok_or("index out of bounds")?;
-        *byte = str::from_utf8(value).ok()
-            .and_then(|s| u8::from_str_radix(s, 16).ok())
-            .ok_or("invalid byte")?;
+        let value = Number::try_from(index).map(i64::from)?;
+        let value = u8::try_from(index).map_err(|_| "invalid byte")?;
+        *byte = value;
         Ok(Cow::Borrowed(b""))
     }
 

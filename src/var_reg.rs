@@ -1,4 +1,5 @@
 use std::{borrow::Cow, collections::HashMap, hash::{BuildHasher, Hasher}};
+use crate::expr::ExpressionFunction;
 
 #[repr(transparent)]
 struct IdentityHash(u64);
@@ -25,6 +26,7 @@ pub struct VariableRegistry {
     // Also, considering how ephemeral and sandboxed variables are,
     // it doesn't really matter :shrug:
     vars: HashMap<u64, Vec<u8>, IdentityHash>,
+    funcs: HashMap<u64, ExpressionFunction, IdentityHash>
 }
 
 impl VariableRegistry {
@@ -32,6 +34,7 @@ impl VariableRegistry {
     pub const fn new() -> Self {
         Self {
             vars: HashMap::with_hasher(IdentityHash(0)),
+            funcs: HashMap::with_hasher(IdentityHash(0)),
         }
     }
 
@@ -39,6 +42,12 @@ impl VariableRegistry {
     pub fn load<'slf, 'name>(&'slf self, name: &'name [u8]) -> Option<&'slf [u8]> {
         let name_hash = seahash::hash(name);
         self.vars.get(&name_hash).map(|v| v.as_slice())
+    }
+
+    /// Loads a function of a given name.
+    pub fn load_fn<'slf, 'name>(&'slf self, name: &'name [u8]) -> Option<&'slf ExpressionFunction> {
+        let name_hash = seahash::hash(name);
+        self.funcs.get(&name_hash)
     }
 
     /// Loads a variable of a given name, giving a mutable reference to it.
@@ -51,6 +60,12 @@ impl VariableRegistry {
     pub fn store<'val, 'slf, 'name>(&'slf mut self, name: &'name [u8], val: Cow<'val, [u8]>) {
         let name_hash = seahash::hash(name);
         self.vars.insert(name_hash, val.into_owned());
+    }
+
+    /// Stores a function into a given name, dropping the old function if it existed.
+    pub fn store_fn<'val, 'slf, 'name>(&'slf mut self, name: &'name [u8], val: ExpressionFunction) {
+        let name_hash = seahash::hash(name);
+        self.funcs.insert(name_hash, val);
     }
 
     /// Drops a variable of a given name, returning a boolean for whether it existed in the first place.

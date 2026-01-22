@@ -21,7 +21,7 @@ impl Number {
     pub const ONE: Number = Number::Integer(1);
 }
 
-fn parse_number(mut value: &[u8]) -> Result<Number, MacroError> {
+pub(crate) fn parse_number(mut value: &[u8]) -> Result<Number, MacroError> {
     if value == b"inf" {
         return Ok(Number::Float(f64::INFINITY));
     } else if value == b"-inf" {
@@ -143,6 +143,16 @@ impl From<Number> for f64 {
             Number::Integer(i) => i as f64,
             Number::Float(f) => f,
             Number::Complex(c) => c.re,
+        }
+    }
+}
+
+impl From<Number> for Complex64 {
+    fn from(value: Number) -> Complex64 {
+        match value {
+            Number::Integer(i) => Complex64::new(i as f64, 0.0),
+            Number::Float(f) => Complex64::new(f, 0.0),
+            Number::Complex(c) => c,
         }
     }
 }

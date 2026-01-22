@@ -11,6 +11,7 @@ mod number;
 pub mod stdlib;
 mod text_macro;
 mod var_reg;
+mod expr;
 
 pub use rand_xoshiro;
 pub use regex;
