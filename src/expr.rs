@@ -130,7 +130,7 @@ impl ExpressionFunction {
 			return Err(format!("in {}: function call depth limit of {DEPTH_LIMIT} exceeded", String::from_utf8_lossy(name)))?;
 		}
 		if self.arg_count != args.len() as u32 {
-			return Err(format!("in {}: args.len() != self.arg_count (this should never happen)", String::from_utf8_lossy(name)))?;
+			return Err(format!("in {}: function takes {} arguments, {} given", String::from_utf8_lossy(name), self.arg_count, args.len()))?;
 		}
 		for node in &self.nodes {
 			match node {
