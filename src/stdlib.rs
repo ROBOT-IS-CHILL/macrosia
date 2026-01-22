@@ -1394,10 +1394,10 @@ def_macro! {
     /// Evaluates an RPN expression. See [expr.def].
     /// # Arguments
     /// 1... The expression.
-    pub macro ExprDef [b"expr.def"] (...value) + _x, v, _r {
+    pub macro Expr [b"expr"] (...value) + _x, v, _r {
         let expr_str = value.flatten().intersperse(&b'/').copied().collect::<Vec<u8>>();
         let expr = ExpressionFunction::parse(&expr_str)?;
-        let res = expr.exec(&[], &*v, &name)?;
+        let res = expr.exec(&[], &*v, b"<inline>")?;
         Ok(Cow::Owned(format!("{res}").into_bytes()))
     }
 }
