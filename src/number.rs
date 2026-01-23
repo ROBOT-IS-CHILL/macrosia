@@ -102,10 +102,15 @@ impl std::fmt::Display for Number {
             Self::Float(x) if x.fract() == 0.0 => write!(f, "{x:.0}"),
             Self::Float(x) => write!(f, "{x}"),
             Self::Complex(c) => {
-                if c.is_nan() { write!(f, "nan+nanj") }
-                else if c.re == 0.0 { write!(f, "{}j", c.im) }
-                else if c.im == 0.0 { write!(f, "{}", c.re) }
-                else { write!(f, "{}{:+}j", c.re, c.im) }
+                if c.is_nan() {
+                    write!(f, "nan+nanj")
+                } else if c.re == 0.0 {
+                    write!(f, "{}j", c.im)
+                } else if c.im == 0.0 {
+                    write!(f, "{}", c.re)
+                } else {
+                    write!(f, "{}{:+}j", c.re, c.im)
+                }
             }
         }
     }

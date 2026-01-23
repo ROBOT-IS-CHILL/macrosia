@@ -1,4 +1,4 @@
-use crate::{Number, MacroError, VariableRegistry};
+use crate::{MacroError, Number, VariableRegistry, intern::InternerEntry};
 use num_complex::Complex64;
 
 const DEPTH_LIMIT: usize = 128;
@@ -11,29 +11,56 @@ enum Node {
     Operator(Operator),
     Input(u32),
     Number(Number),
-    FuncCall(Vec<u8>)
+    FuncCall(InternerEntry),
 }
 
 #[derive(Debug, Copy, Clone)]
 enum Operator {
-    Add, Sub, Mul, Div, Mod, Neg,
-    Less, Leq, Great, Geq, Eq, Neq, Cmp, Tern,
-    LogicAnd, LogicOr, And, Or, Xor, Not, Shl, Shr, AShr,
-    Pow, Log, Abs,
-    Sin, Cos, Tan, Asin, Acos, Atan,
-    Real, Imag, Arg
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Neg,
+    Less,
+    Leq,
+    Great,
+    Geq,
+    Eq,
+    Neq,
+    Cmp,
+    Tern,
+    LogicAnd,
+    LogicOr,
+    And,
+    Or,
+    Xor,
+    Not,
+    Shl,
+    Shr,
+    AShr,
+    Pow,
+    Log,
+    Abs,
+    Sin,
+    Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
+    Real,
+    Imag,
+    Arg,
 }
 
 impl Operator {
     const fn argument_count(&self) -> u32 {
         use Operator::*;
         match self {
-            Add | Sub | Mul | Div | Mod |
-            Less | Leq | Great | Geq | Eq | Neq | Cmp |
-            LogicAnd | LogicOr | And | Or | Xor | Shl | Shr | AShr |
-            Pow | Log => 2,
+            Add | Sub | Mul | Div | Mod | Less | Leq | Great | Geq | Eq | Neq | Cmp | LogicAnd
+            | LogicOr | And | Or | Xor | Shl | Shr | AShr | Pow | Log => 2,
             Tern => 3,
-            _ => 1
+            _ => 1,
         }
     }
     fn try_parse(string: &[u8]) -> Option<Self> {
@@ -74,7 +101,7 @@ impl Operator {
             b"real" => Real,
             b"imag" => Imag,
             b"arg" => Arg,
-            _ => return None
+            _ => return None,
         })
     }
 }
@@ -83,7 +110,9 @@ impl Node {
     fn try_parse(mut string: &[u8]) -> Option<Self> {
         if let Some(s) = string.strip_prefix(b"$") {
             string = s;
-            if !string.iter().all(|c| c.is_ascii_digit()) { return None; }
+            if !string.iter().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
             let num = str::from_utf8(&string).ok()?.parse::<u32>().ok()?;
             return Some(Self::Input(num));
         }
@@ -92,10 +121,15 @@ impl Node {
         }
         if let Some(s) = string.strip_prefix(b"#") {
             string = s;
-            if !string.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'_') { return None; }
+            if !string
+                .iter()
+                .all(|c| c.is_ascii_alphanumeric() || *c == b'_')
+            {
+                return None;
+            }
             let ident = str::from_utf8(string).ok()?;
             return Some(Node::FuncCall(ident.into()));
-        }  
+        }
         Operator::try_parse(string).map(Node::Operator)
     }
 }
@@ -103,157 +137,323 @@ impl Node {
 #[derive(Debug, Clone)]
 pub struct ExpressionFunction {
     nodes: Option<StackEntry>,
-    arg_count: u32
+    arg_count: u32,
 }
 
 #[derive(Debug, Clone)]
 enum StackEntry {
     FuncCall {
-        name: Vec<u8>,
+        name: InternerEntry,
         args: Vec<StackEntry>,
     },
     Operation {
         operator: Operator,
-        args: Vec<StackEntry>
+        args: Vec<StackEntry>,
     },
-    Argument{ index: u32, arg_count: u32},
-    Literal(Number)
+    Argument {
+        index: u32,
+        arg_count: u32,
+    },
+    Literal(Number),
 }
 impl StackEntry {
-    fn eval(&self, var: &VariableRegistry, args: &[StackEntry], depth: usize, name: &[u8], steps: &mut usize) -> Result<Number, MacroError> {
+    fn eval(
+        &self,
+        var: &VariableRegistry,
+        args: &[StackEntry],
+        depth: usize,
+        name: InternerEntry,
+        steps: &mut usize,
+    ) -> Result<Number, MacroError> {
         if depth > DEPTH_LIMIT {
-            return Err(format!("in {}: function call depth limit of {DEPTH_LIMIT} exceeded (after {steps} steps)", String::from_utf8_lossy(name)))?;
+            return Err(format!(
+                "in {}: function call depth limit of {DEPTH_LIMIT} exceeded (after {steps} steps)",
+                name
+            ))?;
         }
         if *steps > STEP_LIMIT {
-            return Err(format!("in {}: step limit of {STEP_LIMIT} exceeded", String::from_utf8_lossy(name)))?;
+            return Err(format!(
+                "in {}: step limit of {STEP_LIMIT} exceeded",
+                name
+            ))?;
         }
         *steps += 1;
         match self {
-            Self::Argument{index, arg_count} => {
-                if arg_count.checked_sub(*index).is_some_and(|idx| args.len() as u32 <= idx) {
-                    return Err(format!("in {}: function takes {} arguments, {} given", String::from_utf8_lossy(name), arg_count, args.len()))?;
+            Self::Argument { index, arg_count } => {
+                if arg_count
+                    .checked_sub(*index)
+                    .is_some_and(|idx| args.len() as u32 <= idx)
+                {
+                    return Err(format!(
+                        "in {}: function takes {} arguments, {} given",
+                        name,
+                        arg_count,
+                        args.len()
+                    ))?;
                 }
-                let entry = args.get((arg_count - index) as usize)
-                    .ok_or_else(|| format!("in {}: arg index {} out of bounds", String::from_utf8_lossy(name), index))?;
+                let entry = args.get((arg_count - index) as usize).ok_or_else(|| {
+                    format!(
+                        "in {}: arg index {} out of bounds",
+                        name,
+                        index
+                    )
+                })?;
                 match entry {
-                    Self::Literal(n) => { Ok(*n) },
-                    other => 
-	                	stacker::maybe_grow(RED_ZONE, STACK_SIZE, ||
-	                    	other.eval(var, args, depth + 1, name, steps)
-	                    )
+                    Self::Literal(n) => Ok(*n),
+                    other => stacker::maybe_grow(RED_ZONE, STACK_SIZE, || {
+                        other.eval(var, args, depth + 1, name, steps)
+                    }),
                 }
             }
-            Self::Operation { operator, args: vals } => {
+            Self::Operation {
+                operator,
+                args: vals,
+            } => {
                 let mut vals = vals.clone();
-                stacker::maybe_grow(RED_ZONE, STACK_SIZE, ||
+                stacker::maybe_grow(RED_ZONE, STACK_SIZE, || {
                     operator.eval(&mut vals, args, var, depth + 1, name, steps)
-                )
+                })
             }
-            Self::FuncCall { name: child, args: cargs } => {
-                let func = var.load_fn(&child).ok_or_else(|| format!("in {}: function with name {} does not exist", String::from_utf8_lossy(name), String::from_utf8_lossy(&child)))?;
+            Self::FuncCall {
+                name: child,
+                args: cargs,
+            } => {
+                let func = var.load_fn(*child).ok_or_else(|| {
+                    format!(
+                        "in {}: function with name {} does not exist",
+                        name,
+                        child
+                    )
+                })?;
 
                 let mut eval_args = Vec::with_capacity(cargs.len());
                 for arg_tree in cargs.iter() {
-                	let val = stacker::maybe_grow(RED_ZONE, STACK_SIZE, ||
-                    	arg_tree.eval(var, args, depth + 1, name, steps)
-                    )?;
+                    let val = stacker::maybe_grow(RED_ZONE, STACK_SIZE, || {
+                        arg_tree.eval(var, args, depth + 1, name, steps)
+                    })?;
                     eval_args.push(StackEntry::Literal(val));
                 }
-                let stack = Vec::<StackEntry>::new();
-                stacker::maybe_grow(RED_ZONE, STACK_SIZE, ||
+                stacker::maybe_grow(RED_ZONE, STACK_SIZE, || {
                     func.nodes
                         .as_ref()
-                        .ok_or_else(|| format!("in {}: tried to call partially defined function {}", String::from_utf8_lossy(name), String::from_utf8_lossy(&child)))?
-                        .eval(var, &eval_args, depth + 1, &child, steps)
-                )
+                        .ok_or_else(|| {
+                            format!(
+                                "in {}: tried to call partially defined function {}",
+                                name,
+                                child
+                            )
+                        })?
+                        .eval(var, &eval_args, depth + 1, *child, steps)
+                })
             }
-            Self::Literal(num) => Ok(*num)
+            Self::Literal(num) => Ok(*num),
         }
     }
 }
 
 impl ExpressionFunction {
-    pub fn parse(string: &[u8], reg: &VariableRegistry, name: &[u8]) -> Result<Self, MacroError> {
-        let nodes = string.split(|b| b.is_ascii_whitespace())
+    pub fn parse(string: &[u8], reg: &VariableRegistry, name: InternerEntry) -> Result<Self, MacroError> {
+        let nodes = string
+            .split(|b| b.is_ascii_whitespace())
             .filter(|s| s.len() != 0)
             .map(Node::try_parse);
         let mut node_vec = Vec::new();
         let mut arg_count = 0;
         for (i, node) in nodes.enumerate() {
-            let Some(node) = node else { return Err(format!("failed to parse node {i}"))?; };
+            let Some(node) = node else {
+                return Err(format!("failed to parse node {i}"))?;
+            };
             if let Node::Input(i) = node {
-                if i == 0 { return Err("input with index 0 is not allowed in expression functions")?; }
+                if i == 0 {
+                    return Err("input with index 0 is not allowed in expression functions")?;
+                }
                 arg_count = arg_count.max(i);
             }
             node_vec.push(node);
         }
-        if node_vec.is_empty() { return Err("empty expression")?; }
+        if node_vec.is_empty() {
+            return Err("empty expression")?;
+        }
         Self::construct_ast(node_vec, arg_count, reg, name)
     }
 
     pub fn forward(arg_count: u32) -> Self {
-        Self { arg_count, nodes: None }
+        Self {
+            arg_count,
+            nodes: None,
+        }
     }
 
     #[inline]
-    pub(crate) fn exec(&self, args: &[Number], reg: &VariableRegistry, name: &[u8]) -> Result<Number, MacroError> {
+    pub(crate) fn exec(
+        &self,
+        args: &[Number],
+        reg: &VariableRegistry,
+        name: InternerEntry,
+    ) -> Result<Number, MacroError> {
         self.nodes
             .as_ref()
-            .ok_or_else(|| format!("in {}: function is only partially defined", String::from_utf8_lossy(name)))?
-            .eval(reg, &args.iter().map(|v| StackEntry::Literal(*v)).collect::<Vec<_>>(), 0, name, &mut 0)
+            .ok_or_else(|| {
+                format!(
+                    "in {}: function is only partially defined",
+                    name
+                )
+            })?
+            .eval(
+                reg,
+                &args
+                    .iter()
+                    .map(|v| StackEntry::Literal(*v))
+                    .collect::<Vec<_>>(),
+                0,
+                name,
+                &mut 0,
+            )
     }
 
-    fn construct_ast(nodes: Vec<Node>, arg_count: u32, reg: &VariableRegistry, name: &[u8]) -> Result<Self, MacroError> {
+    fn construct_ast(
+        nodes: Vec<Node>,
+        arg_count: u32,
+        reg: &VariableRegistry,
+        name: InternerEntry,
+    ) -> Result<Self, MacroError> {
         let mut stack = Vec::new();
         for node in nodes {
             match node {
                 Node::Operator(opr) => {
                     if stack.len() < opr.argument_count() as usize {
-                        return Err(format!("in {}: operator {opr:?} not given enough arguments (expected {})", String::from_utf8_lossy(name), opr.argument_count()))?;
+                        return Err(format!(
+                            "in {}: operator {opr:?} not given enough arguments (expected {})",
+                            name,
+                            opr.argument_count()
+                        ))?;
                     }
                     let args = stack.split_off(stack.len() - (opr.argument_count() as usize));
-                    stack.push(StackEntry::Operation { operator: opr, args });
-                },
+                    stack.push(StackEntry::Operation {
+                        operator: opr,
+                        args,
+                    });
+                }
                 Node::Input(number) => {
-                    stack.push(StackEntry::Argument { index: number, arg_count });
-                },
+                    stack.push(StackEntry::Argument {
+                        index: number,
+                        arg_count,
+                    });
+                }
                 Node::Number(num) => {
                     stack.push(StackEntry::Literal(num));
-                },
+                }
                 Node::FuncCall(fun) => {
-                    let func = reg.load_fn(&fun).ok_or_else(|| format!("in {}: function with name {} does not exist", String::from_utf8_lossy(name), String::from_utf8_lossy(&fun)))?;
+                    let func = reg.load_fn(fun).ok_or_else(|| {
+                        format!(
+                            "in {}: function with name {} does not exist",
+                            name,
+                            fun
+                        )
+                    })?;
                     if stack.len() < func.arg_count as usize {
-                        return Err(format!("in {}: function {} takes {} arguments, {} given", String::from_utf8_lossy(name), String::from_utf8_lossy(&fun), func.arg_count, stack.len()))?;
+                        return Err(format!(
+                            "in {}: function {} takes {} arguments, {} given",
+                            name,
+                            fun,
+                            func.arg_count,
+                            stack.len()
+                        ))?;
                     }
-                    let args = stack.split_off(stack.len() - (func.arg_count as usize)).into_iter().rev().collect::<Vec<_>>();
-                    stack.push(StackEntry::FuncCall { name: fun.to_vec(), args }.into());
+                    let args = stack
+                        .split_off(stack.len() - (func.arg_count as usize))
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>();
+                    stack.push(
+                        StackEntry::FuncCall {
+                            name: fun,
+                            args,
+                        }
+                        .into(),
+                    );
                 }
             }
         }
-        let res = stack.pop().ok_or_else(|| format!("in {}: stack empty", String::from_utf8_lossy(name)))?;
-        Ok(Self { nodes: Some(res), arg_count } )
+        let res = stack
+            .pop()
+            .ok_or_else(|| format!("in {}: stack empty", name))?;
+        Ok(Self {
+            nodes: Some(res),
+            arg_count,
+        })
     }
 }
 
 impl Operator {
-    fn eval(&self, stack: &mut Vec<StackEntry>, args: &[StackEntry], var: &VariableRegistry, depth: usize, name: &[u8], steps: &mut usize) -> Result<Number, MacroError> {
+    fn eval(
+        &self,
+        stack: &mut Vec<StackEntry>,
+        args: &[StackEntry],
+        var: &VariableRegistry,
+        depth: usize,
+        name: InternerEntry,
+        steps: &mut usize,
+    ) -> Result<Number, MacroError> {
         use self::*;
         let stack_len = stack.len();
         macro_rules! spop {
-            () => { stack.pop().ok_or_else(|| format!("in {}: operator does not have enough arguments (expected {}, got {})", String::from_utf8_lossy(name), self.argument_count(), stack_len))?.eval(var, args, depth + 1, name, steps)? };
-            (lazy) => { stack.pop().ok_or_else(|| format!("in {}: operator does not have enough arguments (expected {}, got {})", String::from_utf8_lossy(name), self.argument_count(), stack_len))? }
+            () => {
+                stack
+                    .pop()
+                    .ok_or_else(|| {
+                        format!(
+                            "in {}: operator does not have enough arguments (expected {}, got {})",
+                            name,
+                            self.argument_count(),
+                            stack_len
+                        )
+                    })?
+                    .eval(var, args, depth + 1, name, steps)?
+            };
+            (lazy) => {
+                stack.pop().ok_or_else(|| {
+                    format!(
+                        "in {}: operator does not have enough arguments (expected {}, got {})",
+                        name,
+                        self.argument_count(),
+                        stack_len
+                    )
+                })?
+            };
         }
         Ok(match self {
             Self::Add => spop!() + spop!(),
-            Self::Sub => {let [b, a] = [spop!(), spop!()]; a - b},
+            Self::Sub => {
+                let [b, a] = [spop!(), spop!()];
+                a - b
+            }
             Self::Mul => spop!() * spop!(),
-            Self::Div => {let [b, a] = [spop!(), spop!()]; a / b},
-            Self::Mod => {let [b, a] = [spop!(), spop!()]; a % b},
+            Self::Div => {
+                let [b, a] = [spop!(), spop!()];
+                a / b
+            }
+            Self::Mod => {
+                let [b, a] = [spop!(), spop!()];
+                a % b
+            }
             Self::Neg => -spop!(),
-            Self::Less => { let [b, a] = [spop!(), spop!()]; Number::Integer((a < b) as i64) },
-            Self::Leq => { let [b, a] = [spop!(), spop!()]; Number::Integer((a <= b) as i64) },
-            Self::Great => { let [b, a] = [spop!(), spop!()]; Number::Integer((a > b) as i64) },
-            Self::Geq => { let [b, a] = [spop!(), spop!()]; Number::Integer((a >= b) as i64) },
+            Self::Less => {
+                let [b, a] = [spop!(), spop!()];
+                Number::Integer((a < b) as i64)
+            }
+            Self::Leq => {
+                let [b, a] = [spop!(), spop!()];
+                Number::Integer((a <= b) as i64)
+            }
+            Self::Great => {
+                let [b, a] = [spop!(), spop!()];
+                Number::Integer((a > b) as i64)
+            }
+            Self::Geq => {
+                let [b, a] = [spop!(), spop!()];
+                Number::Integer((a >= b) as i64)
+            }
             Self::Eq => Number::Integer((spop!() == spop!()) as i64),
             Self::Neq => Number::Integer((spop!() != spop!()) as i64),
             Self::Cmp => {
@@ -261,39 +461,82 @@ impl Operator {
                 Number::Float(
                     // Ordering::Less => -1, Ordering::Equal => 0, Ordering::Greater => 1
                     // Thanks, rust stdlib
-                    (a.partial_cmp(&b)).map_or(f64::NAN, |c| c as i8 as f64)
+                    (a.partial_cmp(&b)).map_or(f64::NAN, |c| c as i8 as f64),
                 )
-            },
+            }
             Self::Tern => {
                 let falsy = spop!(lazy);
                 let truthy = spop!(lazy);
                 let cond = spop!();
-                if cond == Number::ZERO { falsy.eval(var, args, depth + 1, name, steps)? } else { truthy.eval(var, args, depth + 1, name, steps)? }
-            },
+                if cond == Number::ZERO {
+                    falsy.eval(var, args, depth + 1, name, steps)?
+                } else {
+                    truthy.eval(var, args, depth + 1, name, steps)?
+                }
+            }
             Self::And => Number::Integer(i64::from(spop!()) & i64::from(spop!())),
             Self::Or => Number::Integer(i64::from(spop!()) | i64::from(spop!())),
             Self::LogicAnd => {
                 let left = spop!();
                 let right = spop!(lazy);
-                if left == Number::ZERO { Number::Integer(0) }
-                else { Number::Integer(if right.eval(var, args, depth + 1, name, steps)? == Number::ZERO { 0 } else { 1 }) }
-            },
+                if left == Number::ZERO {
+                    Number::Integer(0)
+                } else {
+                    Number::Integer(
+                        if right.eval(var, args, depth + 1, name, steps)? == Number::ZERO {
+                            0
+                        } else {
+                            1
+                        },
+                    )
+                }
+            }
             Self::LogicOr => {
                 let left = spop!();
                 let right = spop!(lazy);
-                if left == Number::ZERO { Number::Integer(if right.eval(var, args, depth + 1, name, steps)? == Number::ZERO { 0 } else { 1 }) }
-                else { Number::Integer(1) }
-            },
+                if left == Number::ZERO {
+                    Number::Integer(
+                        if right.eval(var, args, depth + 1, name, steps)? == Number::ZERO {
+                            0
+                        } else {
+                            1
+                        },
+                    )
+                } else {
+                    Number::Integer(1)
+                }
+            }
             Self::Xor => Number::Integer(i64::from(spop!()) ^ i64::from(spop!())),
             Self::Not => Number::Integer(!i64::from(spop!())),
-            Self::Shl => {let [b, a] = [spop!(), spop!()]; Number::Integer(i64::from(a) << ((i64::from(b) as u64) % 64))},
-            Self::Shr => {let [b, a] = [spop!(), spop!()]; Number::Integer(((i64::from(a) as u64) >> (i64::from(b) as u64 % 64)) as i64)},
-            Self::AShr => {let [b, a] = [spop!(), spop!()]; Number::Integer(i64::from(a) >> ((i64::from(b) as u64) % 64))},
-            Self::Pow => {let [b, a] = [spop!(), spop!()]; a.pow(b)},
-            Self::Log => {let [b, a] = [spop!(), spop!()]; a.log(b)},
+            Self::Shl => {
+                let [b, a] = [spop!(), spop!()];
+                Number::Integer(i64::from(a) << ((i64::from(b) as u64) % 64))
+            }
+            Self::Shr => {
+                let [b, a] = [spop!(), spop!()];
+                Number::Integer(((i64::from(a) as u64) >> (i64::from(b) as u64 % 64)) as i64)
+            }
+            Self::AShr => {
+                let [b, a] = [spop!(), spop!()];
+                Number::Integer(i64::from(a) >> ((i64::from(b) as u64) % 64))
+            }
+            Self::Pow => {
+                let [b, a] = [spop!(), spop!()];
+                a.pow(b)
+            }
+            Self::Log => {
+                let [b, a] = [spop!(), spop!()];
+                a.log(b)
+            }
             Self::Abs => match spop!() {
                 Number::Complex(c) => Number::Float(c.norm()),
-                other => if other < Number::ZERO {-other} else {other}  
+                other => {
+                    if other < Number::ZERO {
+                        -other
+                    } else {
+                        other
+                    }
+                }
             },
             Self::Sin => match spop!() {
                 Number::Integer(i) => Number::Float((i as f64).sin()),
@@ -327,11 +570,11 @@ impl Operator {
             },
             Self::Real => match spop!() {
                 Number::Complex(c) => Number::Float(c.re),
-                other => other
+                other => other,
             },
             Self::Imag => match spop!() {
                 Number::Complex(c) => Number::Float(c.im),
-                other => Number::ZERO
+                _other => Number::ZERO,
             },
             Self::Arg => Number::Float(Complex64::from(spop!()).arg()),
         })
@@ -341,11 +584,18 @@ impl Operator {
 #[test]
 fn nodetest() -> Result<(), Box<dyn std::error::Error>> {
     let mut reg = VariableRegistry::new();
+    let entry = InternerEntry::get_or_intern(b"<test>");
 
-    let func = ExpressionFunction::parse(b"1 2 + 3 *", &reg, b"<test>")?;
-    assert_eq!(Number::Integer(9), func.exec(&[], &VariableRegistry::new(), b"<test>")?);
-    let func = ExpressionFunction::parse(b"1 16 0.5 ** /", &reg, b"<test>")?;
-    assert_eq!(Number::Float(0.25), func.exec(&[], &VariableRegistry::new(), b"<test>")?);
+    let func = ExpressionFunction::parse(b"1 2 + 3 *", &reg, entry)?;
+    assert_eq!(
+        Number::Integer(9),
+        func.exec(&[], &VariableRegistry::new(), entry)?
+    );
+    let func = ExpressionFunction::parse(b"1 16 0.5 ** /", &reg, entry)?;
+    assert_eq!(
+        Number::Float(0.25),
+        func.exec(&[], &VariableRegistry::new(), entry)?
+    );
 
     Ok(())
 }
@@ -370,7 +620,12 @@ fn rectest() -> Result<(), Box<dyn std::error::Error>> {
     exec.add_stdlib();
     let mut reg = VariableRegistry::new();
     let mut func = exec.evaluate(string, &mut reg, None, None, &KILL_MACROS);
-    let out = loop { if let Some(v) = func() { break v; } }.map_err(|v| panic!("{v}"))?;
+    let out = loop {
+        if let Some(v) = func() {
+            break v;
+        }
+    }
+    .map_err(|v| panic!("{v}"))?;
     println!("{}", String::from_utf8_lossy(&out));
     Ok(())
 }

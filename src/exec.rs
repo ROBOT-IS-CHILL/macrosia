@@ -1,8 +1,13 @@
 use std::{
-    borrow::Cow, collections::HashMap, hash::BuildHasherDefault, iter::FromFn, panic::AssertUnwindSafe, sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering}
+    borrow::Cow,
+    collections::HashMap,
+    hash::BuildHasherDefault,
+    iter::FromFn,
+    panic::AssertUnwindSafe,
+    sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
 };
 
-use rand_xoshiro::{rand_core::SeedableRng, Xoshiro128PlusPlus};
+use rand_xoshiro::{Xoshiro128PlusPlus, rand_core::SeedableRng};
 
 use crate::{Macro, MacroError, var_reg::VariableRegistry};
 
@@ -39,9 +44,7 @@ impl<'s> StackTriple<'s> {
         if self.start == 0 && self.end == parent.len() {
             return self.target;
         }
-        return Cow::Owned(
-            [&parent[..self.start], &*self.target, &parent[self.end..]].concat()
-        );
+        return Cow::Owned([&parent[..self.start], &*self.target, &parent[self.end..]].concat());
     }
 }
 
@@ -86,7 +89,7 @@ impl Executor {
         self.add_macro_mono(Box::new(mac))
     }
 
-        #[inline]
+    #[inline]
     /// Adds a macro to the executor.
     pub fn clear_macros(&mut self) {
         self.macros.clear();
@@ -125,7 +128,10 @@ impl Executor {
     // Returns a single empty string if the macro is empty.
     pub(crate) fn split_args<'a>(str: &'a [u8]) -> FromFn<impl FnMut() -> Option<&'a [u8]>> {
         let mut str_left = str;
-        str_left = str_left.strip_prefix(b"[").and_then(|s| s.strip_suffix(b"]")).unwrap_or(str_left);
+        str_left = str_left
+            .strip_prefix(b"[")
+            .and_then(|s| s.strip_suffix(b"]"))
+            .unwrap_or(str_left);
         let mut done = false;
 
         let mut was_escape = false;
@@ -192,7 +198,7 @@ impl Executor {
         reg: &'reg mut VariableRegistry,
         step_limit: Option<usize>,
         mut debug_log: Option<&mut Vec<String>>,
-        kill: &AtomicBool
+        kill: &AtomicBool,
     ) -> impl FnMut() -> Option<Result<Cow<'buf, [u8]>, MacroError>> {
         self.current_step.store(1, Ordering::Relaxed);
         let mut rng = Xoshiro128PlusPlus::from_rng(&mut rand::rng());
@@ -225,24 +231,26 @@ impl Executor {
                 let step = self.current_step.fetch_add(1, Ordering::Relaxed);
                 if step % 65536 == 0 && kill.load(Ordering::Relaxed) {
                     return Some(Err(MacroError {
-                        message: Cow::Owned(format!(
-                            "macro execution timed out",
-                        )),
+                        message: Cow::Owned(format!("macro execution timed out",)),
                         trace: self.get_trace(stack_opt.take().unwrap()),
                     }));
                 }
                 if let Some(lim) = step_limit.filter(|l| step >= *l) {
                     return Some(Err(MacroError {
-                        message: Cow::Owned(format!(
-                            "reached step limit of {lim}",
-                        )),
+                        message: Cow::Owned(format!("reached step limit of {lim}",)),
                         trace: self.get_trace(stack_opt.take().unwrap()),
                     }));
                 }
                 if let Some(ref mut log) = debug_log {
                     log.push(format!("  [Step {step}]"));
-                    log.push(format!("[Target] {}", String::from_utf8_lossy(&top.target[start .. end])));
-                    log.push(format!("[Context] {}", String::from_utf8_lossy(&top.target)));
+                    log.push(format!(
+                        "[Target] {}",
+                        String::from_utf8_lossy(&top.target[start..end])
+                    ));
+                    log.push(format!(
+                        "[Context] {}",
+                        String::from_utf8_lossy(&top.target)
+                    ));
                 }
                 let mut args = Self::split_args(&top.target[start..end]);
                 let name = args
@@ -265,10 +273,10 @@ impl Executor {
                             let rng_ = &mut rng;
                             let args_ = &mut args;
                             // Needed so rust doesn't think this is an FnMut
-                            fn typehack<T>(f: impl FnOnce() -> T) -> impl FnOnce() -> T {f}
-                            let clos = typehack(move || {
-                                mac.eval(self, reg, rng_, args_)
-                            });
+                            fn typehack<T>(f: impl FnOnce() -> T) -> impl FnOnce() -> T {
+                                f
+                            }
+                            let clos = typehack(move || mac.eval(self, reg, rng_, args_));
                             match std::panic::catch_unwind(AssertUnwindSafe(clos)) {
                                 Ok(v) => v,
                                 Err(payload) => {
@@ -276,17 +284,22 @@ impl Executor {
                                         Ok(v) => Cow::Owned(*v),
                                         Err(payload) => match payload.downcast::<&'static str>() {
                                             Ok(v) => Cow::Borrowed(*v),
-                                            Err(_) => Cow::Borrowed("<panic payload was not String or &'static str>")
-                                        }
+                                            Err(_) => Cow::Borrowed(
+                                                "<panic payload was not String or &'static str>",
+                                            ),
+                                        },
                                     };
                                     drop(args);
                                     return Some(Err(MacroError {
-                                        message, trace: self.get_trace(stack_opt.take().unwrap())
+                                        message,
+                                        trace: self.get_trace(stack_opt.take().unwrap()),
                                     }));
                                 }
                             }
                         }
-                    } else { mac.eval(self, reg, &mut rng, &mut args) }
+                    } else {
+                        mac.eval(self, reg, &mut rng, &mut args)
+                    }
                 } {
                     Ok(val) => val,
                     Err(mut e) => {

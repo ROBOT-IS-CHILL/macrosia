@@ -1,4 +1,7 @@
 #![feature(int_from_ascii)]
+#![feature(push_mut)]
+#![feature(box_as_ptr)]
+#![feature(clone_from_ref)]
 #![warn(clippy::pedantic, clippy::perf, missing_docs)]
 #![allow(unstable_name_collisions)]
 //! Macrosia, in Rust.
@@ -6,12 +9,13 @@
 use std::borrow::Cow;
 
 mod exec;
+mod expr;
+pub(crate) mod intern;
 mod macro_trait;
 mod number;
 pub mod stdlib;
 mod text_macro;
 mod var_reg;
-mod expr;
 
 pub use rand_xoshiro;
 pub use regex;

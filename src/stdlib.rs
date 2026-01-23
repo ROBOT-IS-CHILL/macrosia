@@ -1,13 +1,14 @@
 //! Defines some basic macros for regular use.
 
-use crate::{Macro, MacroError, Number, var_reg::VariableRegistry, expr::ExpressionFunction};
+use crate::{Macro, MacroError, Number, expr::ExpressionFunction, var_reg::VariableRegistry, intern::InternerEntry};
 use aho_corasick::AhoCorasick;
 use base64::Engine;
 use const_format::concatcp;
-use flate2::{Compression, write::ZlibEncoder, read::ZlibDecoder};
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use itertools::Itertools as _;
 use rand::seq::SliceRandom as _;
 use rand::{Rng, SeedableRng};
+use rand_xoshiro::Xoshiro128PlusPlus;
 use regex::Regex;
 use std::i64;
 use std::io::prelude::*;
@@ -17,7 +18,6 @@ use std::{
     ops::{Add as _, Mul as _},
     sync::OnceLock,
 };
-use rand_xoshiro::Xoshiro128PlusPlus;
 
 macro_rules! regex {
     ($re:literal $(,)?) => {{
@@ -354,7 +354,8 @@ def_macro! {
     /// 1. The name to store the variable under.
     /// 2. The value to store in the variable.
     pub macro Store [b"store"] (name, value) + _x, v, _r {
-        v.store(&*name, Vec::from(value).into()); // The value could easily outlive the argument, so we clone
+        let entry = InternerEntry::get_or_intern(name);
+        v.store(entry, Vec::from(value).into()); // The value could easily outlive the argument, so we clone
         Ok(Cow::Borrowed(b""))
     }
 
@@ -362,7 +363,8 @@ def_macro! {
     /// # Arguments
     /// 1. The name of the variable to load.
     pub macro Load [b"load"] (name) + _x, v, _r {
-        v.load(&*name)
+        let entry = InternerEntry::get_or_intern(name);
+        v.load(entry)
             .map(Vec::from)
             .map(Cow::Owned)
             .ok_or_else(move || format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into())
@@ -372,7 +374,8 @@ def_macro! {
     /// # Arguments
     /// 1. The name of the variable to drop.
     pub macro Drop [b"drop"] (name) + _x, v, _r {
-        v.drop(name);
+        let entry = InternerEntry::get_or_intern(name);
+        v.drop(entry);
         Ok(Cow::Borrowed(b""))
     }
 
@@ -381,10 +384,11 @@ def_macro! {
     /// 1. The name of the variable to load.
     /// 2. The value to output if the variable does not exist.
     pub macro Get [b"get"] (name, default) + _x, v, _r {
-        let value = match v.load(&*name) {
+        let entry = InternerEntry::get_or_intern(name);
+        let value = match v.load(entry) {
             Some(v) => v,
             None => {
-                v.store(&*name, Cow::Borrowed(default));
+                v.store(entry, Cow::Borrowed(default));
                 &*default
             }
         };
@@ -1020,8 +1024,9 @@ def_macro! {
     /// Checks if a variable exists.
     /// # Arguments
     /// 1. The variable name to check.
-    pub macro IsStored [b"is_stored"] (val) + _x, v, _r {
-        Ok(Cow::Borrowed(v.load(val).map_or(b"false", |_| b"true")))
+    pub macro IsStored [b"is_stored"] (name) + _x, v, _r {
+        let entry = InternerEntry::get_or_intern(name);
+        Ok(Cow::Borrowed(v.load(entry).map_or(b"false", |_| b"true")))
     }
 
     /// Gets the current execution step number.
@@ -1121,7 +1126,8 @@ def_macro! {
     /// 2. The byte index in the variable. Must be greater than or equal to 0.
     /// 3. The value to set the byte to.
     pub macro ByteSet [b"byte.set"] (name, index, value) + _x, v, _r {
-        let buf = v.load_mut(&*name)
+        let entry = InternerEntry::get_or_intern(name);
+        let buf = v.load_mut(entry)
             .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
         let index = Number::try_from(index).map(i64::from)?;
         let index = usize::try_from(index).map_err(|_| "invalid index")?;
@@ -1137,7 +1143,8 @@ def_macro! {
     /// 1. The variable to index into.
     /// 2. The byte index in the variable. Must be greater than or equal to 0.
     pub macro ByteGet [b"byte.get"] (name, index) + _x, v, _r {
-        let buf = v.load(&*name)
+        let entry = InternerEntry::get_or_intern(name);
+        let buf = v.load(entry)
             .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
         let index = Number::try_from(index).map(i64::from)?;
         let index = usize::try_from(index).map_err(|_| "invalid index")?;
@@ -1152,7 +1159,8 @@ def_macro! {
     /// 3. The byte index to start in the variable. Must be greater than or equal to 0.
     /// 4? The byte index to end in the variable. Must be greater than or equal to 0. Defaults to the end of the string.
     pub macro ByteSplice [b"byte.splice"] (name, value, start, ...iter) + _x, v, _r {
-        let buf = v.load_mut(&*name)
+        let entry = InternerEntry::get_or_intern(name);
+        let buf = v.load_mut(entry)
             .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
 
         if value.len() % 2 != 0 { return Err("hexstring length must be even")? }
@@ -1266,14 +1274,14 @@ def_macro! {
     }
 
     /// Interpolates a value using a given time and easing method.
-    /// 
+    ///
     /// Supported easings:
     /// `back`, `bounce`, `circ`, `elastic`, `expo`, `sine`, `quad`, `cubic`, `quart`, `quint`, `linear`
-    /// 
+    ///
     /// All easings except for `linear` must be followed by `_in`, `_out`, or `_in_out`.
-    /// 
+    ///
     /// For more information, see https://easings.net/.
-    /// 
+    ///
     /// # Arguments
     /// 1. The number at the start of the easing animation.
     /// 2. The number at the end of the easing animation.
@@ -1327,12 +1335,12 @@ def_macro! {
     /// # Syntax
     /// Expressions are defined using Reverse Polish Notation.
     /// For example, `1 2 +` -> `3`.
-    /// 
+    ///
     /// Each operator or number (generally called a _node_) must be
     /// separated by at least one whitespace character.
     /// Also supported is the node `$N`, for input values, and
     /// `#<ident>`, which allows calling other expressions inside of an expression.
-    /// 
+    ///
     /// Calling an expression will pop its required arguments from the stack.
     /// For example, `[expr.def/inc/1 +][expr.call/inc/5]` -> `6`.
     /// ## Supported Operators
@@ -1374,22 +1382,24 @@ def_macro! {
     /// 1. The name to save the expression under.
     /// 2... The expression
     pub macro ExprDef [b"expr.def"] (name, ...value) + _x, v, _r {
+        let entry = InternerEntry::get_or_intern(name);
         let expr_str = value.intersperse(b"/").flatten().copied().collect::<Vec<u8>>();
-        let expr = ExpressionFunction::parse(&expr_str, &v, name)?;
-        v.store_fn(name, expr);
+        let expr = ExpressionFunction::parse(&expr_str, &v, entry)?;
+        v.store_fn(entry, expr);
         Ok(Cow::Borrowed(b""))
     }
 
     /// Sets up an RPN expression with a given amount of arguments to be defined later.
     /// Useful for recursive calls.
-    /// 
+    ///
     /// # Arguments
     /// 1. The name to save the expression under.
     /// 2. The amount of arguments the expression takes.
     pub macro ExprForward [b"expr.fwd"] (name, count) + _x, v, _r {
+        let entry = InternerEntry::get_or_intern(name);
         let count: u32 = i64::from(Number::try_from(count)?).try_into().map_err(|v| format!("{v}"))?;
         let expr = ExpressionFunction::forward(count);
-        v.store_fn(name, expr);
+        v.store_fn(entry, expr);
         Ok(Cow::Borrowed(b""))
     }
 
@@ -1398,9 +1408,10 @@ def_macro! {
     /// 1. The name of the expression to call.
     /// 2... The expression arguments. Must all be numbers.
     pub macro ExprCall [b"expr.call"] (name, ...args) + _x, v, _r {
-        let expr = v.load_fn(name).ok_or("expression is undefined")?;
+        let entry = InternerEntry::get_or_intern(name);
+        let expr = v.load_fn(entry).ok_or("expression is undefined")?;
         let args = args.map(|v| Number::try_from(&*v)).collect::<Result<Vec<_>, _>>()?;
-        let res = expr.exec(&args, &*v, &name)?;
+        let res = expr.exec(&args, &*v, entry)?;
         Ok(Cow::Owned(format!("{res}").into_bytes()))
     }
 
@@ -1408,9 +1419,10 @@ def_macro! {
     /// # Arguments
     /// 1... The expression.
     pub macro Expr [b"expr"] (...value) + _x, v, _r {
+        let entry = InternerEntry::get_or_intern(b"<inline>");
         let expr_str = value.intersperse(b"/").flatten().copied().collect::<Vec<u8>>();
-        let expr = ExpressionFunction::parse(&expr_str, &VariableRegistry::new(), b"<inline>")?;
-        let res = expr.exec(&[], &*v, b"<inline>")?;
+        let expr = ExpressionFunction::parse(&expr_str, &VariableRegistry::new(), entry)?;
+        let res = expr.exec(&[], &*v, entry)?;
         Ok(Cow::Owned(format!("{res}").into_bytes()))
     }
 }
