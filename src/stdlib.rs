@@ -925,7 +925,10 @@ def_macro! {
     /// 1... The macro names to check.
     pub macro IsMacro [b"macro"] (...args) + x, _v, _r {
         Ok(Cow::Owned(
-            args.map(|arg| -> &[u8] { if x.macros().get(arg).is_some() { b"true" } else { b"false" } } ).intersperse(b"/").flatten().copied().collect::<Vec<_>>()
+            args.map(|arg| -> &[u8] {
+                if InternerEntry::get(arg).and_then(|name| x.macros().get(&name)).is_some()
+                    { b"true" } else { b"false" }
+            } ).intersperse(b"/").flatten().copied().collect::<Vec<_>>()
         ))
     }
 

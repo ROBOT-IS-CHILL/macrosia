@@ -9,9 +9,9 @@ use std::{
 
 use rand_xoshiro::{Xoshiro128PlusPlus, rand_core::SeedableRng};
 
-use crate::{Macro, MacroError, var_reg::VariableRegistry};
+use crate::{Macro, MacroError, var_reg::VariableRegistry, intern::InternerEntry};
 
-type MacroMap = HashMap<Vec<u8>, Box<dyn Macro>, BuildHasherDefault<seahash::SeaHasher>>;
+type MacroMap = HashMap<InternerEntry, Box<dyn Macro>, BuildHasherDefault<seahash::SeaHasher>>;
 
 /// An executor interface for Macrosia.
 pub struct Executor {
@@ -26,7 +26,7 @@ impl Clone for Executor {
             macros: self
                 .macros
                 .iter()
-                .map(|(key, mac)| (key.clone(), Macro::clone(&**mac)))
+                .map(|(key, mac)| (*key, Macro::clone(&**mac)))
                 .collect(),
             context: AtomicU8::new(self.context.load(Ordering::Relaxed)),
             current_step: AtomicUsize::new(0),
@@ -75,7 +75,8 @@ impl Executor {
 
     /// Gets a macro from the executor.
     pub fn get_macro(&self, macro_name: &[u8]) -> Option<&dyn Macro> {
-        self.macros.get(macro_name).map(|v| &**v)
+        let entry = InternerEntry::get(macro_name)?;
+        self.macros.get(&entry).map(|v| &**v)
     }
 
     /// Gets the map of all macros in the executor keyed with their names.
@@ -96,7 +97,8 @@ impl Executor {
     }
 
     fn add_macro_mono(&mut self, mac: Box<dyn Macro>) {
-        self.macros.insert(Vec::from(mac.name()), mac);
+        let entry = InternerEntry::get_or_intern(mac.name());
+        self.macros.insert(entry, mac);
     }
 
     fn find_first_block(str: &[u8]) -> Option<[usize; 2]> {

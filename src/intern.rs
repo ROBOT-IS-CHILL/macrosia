@@ -21,6 +21,17 @@ pub(crate) static INTERNER: RwLock<Interner> = RwLock::new(Interner {
 });
 
 impl InternerEntry {
+    /// Gets the entry corresponding to a string if it exists.
+    pub fn get(string: &[u8]) -> Option<InternerEntry> {
+        let mut lock = INTERNER
+            .read()
+            .map_err(|_| panic!("other thread panicked"))
+            .unwrap();
+        if let Some(id) = lock.map.get(&string) {
+            return Some(InternerEntry(*id));
+        }
+        None
+    }
     /// Gets the entry corresponding to a string, or interns it and returns the new entry.
     pub fn get_or_intern(string: &[u8]) -> InternerEntry {
         let mut lock = INTERNER
