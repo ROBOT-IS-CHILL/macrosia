@@ -1,7 +1,4 @@
 #![feature(int_from_ascii)]
-#![feature(push_mut)]
-#![feature(box_as_ptr)]
-#![feature(clone_from_ref)]
 #![warn(clippy::pedantic, clippy::perf, missing_docs)]
 #![allow(unstable_name_collisions)]
 //! Macrosia, in Rust.
