@@ -221,8 +221,7 @@ pub fn get_stdlib_macro_names() -> Vec<String> {
     let mut exec: Executor = Executor::new(0);
     exec.add_stdlib();
     exec.macros().iter()
-        .map(|(v, m)| format!("{}\n{}",
-            String::from_utf8_lossy(&*v).into_owned(),
+        .map(|(v, m)| format!("{v}\n{}",
             m.description()
         ))
         .collect()
