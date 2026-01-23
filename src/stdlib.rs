@@ -1375,7 +1375,20 @@ def_macro! {
     /// 2... The expression
     pub macro ExprDef [b"expr.def"] (name, ...value) + _x, v, _r {
         let expr_str = value.intersperse(b"/").flatten().copied().collect::<Vec<u8>>();
-        let expr = ExpressionFunction::parse(&expr_str)?;
+        let expr = ExpressionFunction::parse(&expr_str, &v, name)?;
+        v.store_fn(name, expr);
+        Ok(Cow::Borrowed(b""))
+    }
+
+    /// Sets up an RPN expression with a given amount of arguments to be defined later.
+    /// Useful for recursive calls.
+    /// 
+    /// # Arguments
+    /// 1. The name to save the expression under.
+    /// 2. The amount of arguments the expression takes.
+    pub macro ExprForward [b"expr.fwd"] (name, count) + _x, v, _r {
+        let count: u32 = i64::from(Number::try_from(count)?).try_into().map_err(|v| format!("{v}"))?;
+        let expr = ExpressionFunction::forward(count);
         v.store_fn(name, expr);
         Ok(Cow::Borrowed(b""))
     }
@@ -1396,7 +1409,7 @@ def_macro! {
     /// 1... The expression.
     pub macro Expr [b"expr"] (...value) + _x, v, _r {
         let expr_str = value.intersperse(b"/").flatten().copied().collect::<Vec<u8>>();
-        let expr = ExpressionFunction::parse(&expr_str)?;
+        let expr = ExpressionFunction::parse(&expr_str, &VariableRegistry::new(), b"<inline>")?;
         let res = expr.exec(&[], &*v, b"<inline>")?;
         Ok(Cow::Owned(format!("{res}").into_bytes()))
     }
