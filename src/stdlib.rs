@@ -484,8 +484,8 @@ def_macro! {
 
     /// Repeats a string a given amount of times.
     /// # Arguments
-    /// 1. The string to repeat.
-    /// 2. The amount of times to repeat the string.
+    /// 1. The amount of times to repeat the string.
+    /// 2. The string to repeat.
     /// 3? The separator between each string.
     pub macro Repeat [b"repeat"] (times, value, ...iter) + _x, _v, _r {
         let joiner = iter.next().unwrap_or(b"");
