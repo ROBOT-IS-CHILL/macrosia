@@ -70,10 +70,21 @@ macro_rules! def_macro {
             fn source(&self) -> &[u8] { stringify!($body).trim().as_bytes() }
         }
     )*
-
+    
     impl crate::exec::Executor {
-
+        /// Does a quick search for a builtin macro, returning [`None`] if not found.
+        pub fn get_builtin(builtin_name: &[u8]) -> Option<&'static dyn Macro> {
+            return match builtin_name {
+                $( $name => Some(&$sname), )*
+                _ => None
+            }
+        }
+        
         /// Adds all standard library macros to the given execution context.
+        /// 
+        /// The executor doesn't actually pull from this for execution anymore,
+        /// so this is purely for if you need them for e.g.
+        /// automatically generating documentation.
         #[allow(deprecated)]
         pub fn add_stdlib(&mut self) {
             $(
@@ -81,9 +92,7 @@ macro_rules! def_macro {
             )*
         }
     }
-
-    };
-}
+};}
 
 /// Unescapes `[`, `/`, and `]` in an 8-bit clean string.
 ///

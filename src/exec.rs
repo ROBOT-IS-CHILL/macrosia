@@ -75,6 +75,7 @@ impl Executor {
 
     /// Gets a macro from the executor.
     pub fn get_macro(&self, macro_name: &[u8]) -> Option<&dyn Macro> {
+        if let val @ Some(_) = Self::get_builtin(macro_name) { return val; }
         let entry = InternerEntry::get(macro_name)?;
         self.macros.get(&entry).map(|v| &**v)
     }
