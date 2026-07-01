@@ -1355,7 +1355,21 @@ def_macro! {
     ///
     /// Calling an expression will pop its required arguments from the stack.
     /// For example, `[expr.def/inc/1 +][expr.call/inc/5]` -> `6`.
-    /// ## Supported Operators
+    /// 
+    /// See the documentation for [expr.def_ops] for supported operators.
+    ///
+    /// # Arguments
+    /// 1. The name to save the expression under.
+    /// 2... The expression
+    pub macro ExprDef [b"expr.def"] (name, ...value) + _x, v, _r {
+        let entry = InternerEntry::get_or_intern(name);
+        let expr_str = value.intersperse(b"/").flatten().copied().collect::<Vec<u8>>();
+        let expr = ExpressionFunction::parse(&expr_str, &v, entry)?;
+        v.store_fn(entry, expr);
+        Ok(Cow::Borrowed(b""))
+    }
+    
+    /// ## Supported Operators for `[expr.def]`
     /// - `**`: Exponent
     /// - `log`: Log of arg 1 with base of arg 2
     /// - `abs`: Absolute value
@@ -1389,15 +1403,7 @@ def_macro! {
     /// - `real`: Real component of complex number
     /// - `imag`: Imaginary component of complex number
     /// - `arg`: Argument of complex number
-    ///
-    /// # Arguments
-    /// 1. The name to save the expression under.
-    /// 2... The expression
-    pub macro ExprDef [b"expr.def"] (name, ...value) + _x, v, _r {
-        let entry = InternerEntry::get_or_intern(name);
-        let expr_str = value.intersperse(b"/").flatten().copied().collect::<Vec<u8>>();
-        let expr = ExpressionFunction::parse(&expr_str, &v, entry)?;
-        v.store_fn(entry, expr);
+    macro ExprDefOps [b"expr.def_ops"] () + _x, _v, _r {
         Ok(Cow::Borrowed(b""))
     }
 
@@ -1436,6 +1442,23 @@ def_macro! {
         let expr = ExpressionFunction::parse(&expr_str, &VariableRegistry::new(), entry)?;
         let res = expr.exec(&[], &*v, entry)?;
         Ok(Cow::Owned(format!("{res}").into_bytes()))
+    }
+    
+    /// Formats a float.
+    /// # Arguments
+    /// 1. The number to format.
+    /// 2. The amount of desired digits after the decimal point. If set to 0, the formatter will automatically choose a length.
+    /// 3? The amount of desired digits before the decimal point. Defaults to 1.
+    /// 4? Whether to use scientific notation. Defaults to false. 
+    pub macro FloatFormat [b"floatfmt"] (num, after, ...iter) + _x, _v, _r {
+        let number = f64::from(Number::try_from(num)?);
+        let after = i64::from(Number::try_from(after)?) as usize;
+        let before = iter.next().map(Number::try_from).transpose()?.map(i64::from).map(|v| v as usize).unwrap_or(1);
+        Ok(Cow::Owned(if iter.next().is_some_and(is_truthy) {
+            format!("{number:0$.1$e}", before, after)
+        } else {
+            format!("{number:0$.1$}", before, after)
+        }.into_bytes()))
     }
 }
 
