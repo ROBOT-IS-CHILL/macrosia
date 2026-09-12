@@ -1,8 +1,10 @@
+use std::collections::VecDeque;
+
 use crate::{MacroError, Number, VariableRegistry, intern::InternerEntry};
 use num_complex::Complex64;
 
-const DEPTH_LIMIT: usize = 128;
-const STEP_LIMIT: usize = 1024 * 1024 * 8;
+const STEP_LIMIT: usize = 256 * 1024;
+const DEPTH_LIMIT: usize = 1024;
 const RED_ZONE: usize = 16 * 1024;
 const STACK_SIZE: usize = 1024 * 1024;
 
@@ -51,12 +53,34 @@ enum Operator {
     Real,
     Imag,
     Arg,
+    Copy,
+    Swap,
+    Rotate,
+    StackLength,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExprAST {
+    nodes: ASTNode,
+    arg_count: u32,
+    name: InternerEntry,
+}
+
+#[derive(Debug, Clone)]
+enum Step {
+    Operator(Operator),
+    Input(u32),
+    Number(Number),
+    FuncCall(InternerEntry),
+    Branch(usize),
+    Jump(usize),
 }
 
 impl Operator {
     const fn argument_count(&self) -> u32 {
         use Operator::*;
         match self {
+            Copy | Swap | Rotate | StackLength => 0,
             Add | Sub | Mul | Div | Mod | Less | Leq | Great | Geq | Eq | Neq | Cmp | LogicAnd
             | LogicOr | And | Or | Xor | Shl | Shr | AShr | Pow | Log => 2,
             Tern => 3,
@@ -101,6 +125,10 @@ impl Operator {
             b"real" => Real,
             b"imag" => Imag,
             b"arg" => Arg,
+            b"->" => Copy,
+            b"<>" => Swap,
+            b"<>>" => Rotate,
+            b"@" => StackLength,
             _ => return None,
         })
     }
@@ -135,124 +163,25 @@ impl Node {
 }
 
 #[derive(Debug, Clone)]
-pub struct ExpressionFunction {
-    nodes: Option<StackEntry>,
-    arg_count: u32,
-}
-
-#[derive(Debug, Clone)]
-enum StackEntry {
+enum ASTNode {
     FuncCall {
         name: InternerEntry,
-        args: Vec<StackEntry>,
+        args: Vec<ASTNode>,
     },
     Operation {
         operator: Operator,
-        args: Vec<StackEntry>,
+        args: Vec<ASTNode>,
     },
-    Argument {
-        index: u32,
-        arg_count: u32,
-    },
+    Argument(u32),
     Literal(Number),
 }
-impl StackEntry {
-    fn eval(
-        &self,
-        var: &VariableRegistry,
-        args: &[StackEntry],
-        depth: usize,
+
+impl ExprAST {
+    pub fn parse(
+        string: &[u8],
+        reg: &VariableRegistry,
         name: InternerEntry,
-        steps: &mut usize,
-    ) -> Result<Number, MacroError> {
-        if depth > DEPTH_LIMIT {
-            return Err(format!(
-                "in {}: function call depth limit of {DEPTH_LIMIT} exceeded (after {steps} steps)",
-                name
-            ))?;
-        }
-        if *steps > STEP_LIMIT {
-            return Err(format!(
-                "in {}: step limit of {STEP_LIMIT} exceeded",
-                name
-            ))?;
-        }
-        *steps += 1;
-        match self {
-            Self::Argument { index, arg_count } => {
-                if arg_count
-                    .checked_sub(*index)
-                    .is_some_and(|idx| args.len() as u32 <= idx)
-                {
-                    return Err(format!(
-                        "in {}: function takes {} arguments, {} given",
-                        name,
-                        arg_count,
-                        args.len()
-                    ))?;
-                }
-                let entry = args.get((arg_count - index) as usize).ok_or_else(|| {
-                    format!(
-                        "in {}: arg index {} out of bounds",
-                        name,
-                        index
-                    )
-                })?;
-                match entry {
-                    Self::Literal(n) => Ok(*n),
-                    other => stacker::maybe_grow(RED_ZONE, STACK_SIZE, || {
-                        other.eval(var, args, depth + 1, name, steps)
-                    }),
-                }
-            }
-            Self::Operation {
-                operator,
-                args: vals,
-            } => {
-                let mut vals = vals.clone();
-                stacker::maybe_grow(RED_ZONE, STACK_SIZE, || {
-                    operator.eval(&mut vals, args, var, depth + 1, name, steps)
-                })
-            }
-            Self::FuncCall {
-                name: child,
-                args: cargs,
-            } => {
-                let func = var.load_fn(*child).ok_or_else(|| {
-                    format!(
-                        "in {}: function with name {} does not exist",
-                        name,
-                        child
-                    )
-                })?;
-
-                let mut eval_args = Vec::with_capacity(cargs.len());
-                for arg_tree in cargs.iter() {
-                    let val = stacker::maybe_grow(RED_ZONE, STACK_SIZE, || {
-                        arg_tree.eval(var, args, depth + 1, name, steps)
-                    })?;
-                    eval_args.push(StackEntry::Literal(val));
-                }
-                stacker::maybe_grow(RED_ZONE, STACK_SIZE, || {
-                    func.nodes
-                        .as_ref()
-                        .ok_or_else(|| {
-                            format!(
-                                "in {}: tried to call partially defined function {}",
-                                name,
-                                child
-                            )
-                        })?
-                        .eval(var, &eval_args, depth + 1, *child, steps)
-                })
-            }
-            Self::Literal(num) => Ok(*num),
-        }
-    }
-}
-
-impl ExpressionFunction {
-    pub fn parse(string: &[u8], reg: &VariableRegistry, name: InternerEntry) -> Result<Self, MacroError> {
+    ) -> Result<Self, MacroError> {
         let nodes = string
             .split(|b| b.is_ascii_whitespace())
             .filter(|s| s.len() != 0)
@@ -277,40 +206,6 @@ impl ExpressionFunction {
         Self::construct_ast(node_vec, arg_count, reg, name)
     }
 
-    pub fn forward(arg_count: u32) -> Self {
-        Self {
-            arg_count,
-            nodes: None,
-        }
-    }
-
-    #[inline]
-    pub(crate) fn exec(
-        &self,
-        args: &[Number],
-        reg: &VariableRegistry,
-        name: InternerEntry,
-    ) -> Result<Number, MacroError> {
-        self.nodes
-            .as_ref()
-            .ok_or_else(|| {
-                format!(
-                    "in {}: function is only partially defined",
-                    name
-                )
-            })?
-            .eval(
-                reg,
-                &args
-                    .iter()
-                    .map(|v| StackEntry::Literal(*v))
-                    .collect::<Vec<_>>(),
-                0,
-                name,
-                &mut 0,
-            )
-    }
-
     fn construct_ast(
         nodes: Vec<Node>,
         arg_count: u32,
@@ -329,27 +224,20 @@ impl ExpressionFunction {
                         ))?;
                     }
                     let args = stack.split_off(stack.len() - (opr.argument_count() as usize));
-                    stack.push(StackEntry::Operation {
+                    stack.push(ASTNode::Operation {
                         operator: opr,
                         args,
                     });
                 }
                 Node::Input(number) => {
-                    stack.push(StackEntry::Argument {
-                        index: number,
-                        arg_count,
-                    });
+                    stack.push(ASTNode::Argument(number));
                 }
                 Node::Number(num) => {
-                    stack.push(StackEntry::Literal(num));
+                    stack.push(ASTNode::Literal(num));
                 }
                 Node::FuncCall(fun) => {
                     let func = reg.load_fn(fun).ok_or_else(|| {
-                        format!(
-                            "in {}: function with name {} does not exist",
-                            name,
-                            fun
-                        )
+                        format!("in {}: function with name {} does not exist", name, fun)
                     })?;
                     if stack.len() < func.arg_count as usize {
                         return Err(format!(
@@ -365,13 +253,7 @@ impl ExpressionFunction {
                         .into_iter()
                         .rev()
                         .collect::<Vec<_>>();
-                    stack.push(
-                        StackEntry::FuncCall {
-                            name: fun,
-                            args,
-                        }
-                        .into(),
-                    );
+                    stack.push(ASTNode::FuncCall { name: fun, args }.into());
                 }
             }
         }
@@ -379,222 +261,333 @@ impl ExpressionFunction {
             .pop()
             .ok_or_else(|| format!("in {}: stack empty", name))?;
         Ok(Self {
-            nodes: Some(res),
+            nodes: res,
             arg_count,
+            name,
         })
     }
 }
 
-impl Operator {
-    fn eval(
+impl ASTNode {
+    pub(crate) fn to_bytecode(&self) -> Vec<Step> {
+        match self {
+            ASTNode::Operation {
+                operator: Operator::LogicAnd,
+                args,
+            } => {
+                let left = &args[0];
+                let right = &args[1];
+                let right_code = right.to_bytecode();
+                let right_len = right_code.len();
+                let mut res = left.to_bytecode();
+                res.push(Step::Branch(2));
+                res.push(Step::Number(Number::Integer(0)));
+                res.push(Step::Jump(right_len));
+                res.extend(right_code);
+                res
+            }
+            ASTNode::Operation {
+                operator: Operator::LogicOr,
+                args,
+            } => {
+                let left = &args[0];
+                let right = &args[1];
+                let right_code = right.to_bytecode();
+                let right_len = right_code.len();
+                let mut res = left.to_bytecode();
+                res.push(Step::Branch(right_len + 1));
+                res.extend(right_code);
+                res.push(Step::Jump(1));
+                res.push(Step::Number(Number::Integer(1)));
+                res
+            }
+            ASTNode::Operation {
+                operator: Operator::Tern,
+                args,
+            } => {
+                let cond = &args[0];
+                let left = &args[1];
+                let right = &args[2];
+                let left_code = left.to_bytecode();
+                let left_len = left_code.len();
+                let right_code = right.to_bytecode();
+                let right_len = right_code.len();
+                let mut res = cond.to_bytecode();
+                res.push(Step::Branch(right_len + 1));
+                res.extend(right_code);
+                res.push(Step::Jump(left_len));
+                res.extend(left_code);
+                res
+            }
+            ASTNode::FuncCall { name, args } => args
+                .iter()
+                .flat_map(ASTNode::to_bytecode)
+                .chain(std::iter::once(Step::FuncCall(*name)))
+                .collect(),
+            ASTNode::Operation { operator, args } => args
+                .iter()
+                .flat_map(ASTNode::to_bytecode)
+                .chain(std::iter::once(Step::Operator(*operator)))
+                .collect(),
+            ASTNode::Argument(index) => vec![Step::Input(*index)],
+            ASTNode::Literal(number) => vec![Step::Number(*number)],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledExpr {
+    arg_count: u32,
+    bytecode: Vec<Step>,
+    name: InternerEntry,
+}
+
+impl CompiledExpr {
+    pub const fn forward(arg_count: u32, name: InternerEntry) -> Self {
+        Self {
+            arg_count,
+            bytecode: Vec::new(),
+            name,
+        }
+    }
+
+    pub fn execute(
         &self,
-        stack: &mut Vec<StackEntry>,
-        args: &[StackEntry],
-        var: &VariableRegistry,
-        depth: usize,
-        name: InternerEntry,
-        steps: &mut usize,
+        inputs: Vec<Number>,
+        var_reg: &VariableRegistry,
     ) -> Result<Number, MacroError> {
-        use self::*;
-        let stack_len = stack.len();
-        macro_rules! spop {
+        self._execute(inputs, var_reg, 0, &mut 0)
+    }
+    
+    fn _execute(
+        &self,
+        inputs: Vec<Number>,
+        var_reg: &VariableRegistry,
+        depth: usize,
+        steps: &mut usize
+    ) -> Result<Number, MacroError> {
+        if depth > DEPTH_LIMIT {
+            return Err(format!("in {}: exceeded depth limit", self.name))?;
+        }
+        if self.bytecode.len() == 0 {
+            return Err(format!("function {} is not ready yet", self.name))?;
+        }
+        let mut bytecode = VecDeque::from(self.bytecode.clone());
+        let mut stack = Vec::<Number>::new();
+        macro_rules! pop {
             () => {
                 stack
                     .pop()
-                    .ok_or_else(|| {
-                        format!(
-                            "in {}: operator does not have enough arguments (expected {}, got {})",
-                            name,
-                            self.argument_count(),
-                            stack_len
-                        )
-                    })?
-                    .eval(var, args, depth + 1, name, steps)?
-            };
-            (lazy) => {
-                stack.pop().ok_or_else(|| {
-                    format!(
-                        "in {}: operator does not have enough arguments (expected {}, got {})",
-                        name,
-                        self.argument_count(),
-                        stack_len
-                    )
-                })?
+                    .ok_or_else(|| MacroError::from(format!("in {}: stack exhausted", self.name)))
             };
         }
-        Ok(match self {
-            Self::Add => spop!() + spop!(),
-            Self::Sub => {
-                let [b, a] = [spop!(), spop!()];
-                a - b
+        loop {
+            let Some(step) = bytecode.pop_front() else {
+                return pop!();
+            };
+            *steps += 1;
+            if *steps > STEP_LIMIT {
+                return Err(format!("in {}: exceeded step limit", self.name))?;
             }
-            Self::Mul => spop!() * spop!(),
-            Self::Div => {
-                let [b, a] = [spop!(), spop!()];
-                a / b
-            }
-            Self::Mod => {
-                let [b, a] = [spop!(), spop!()];
-                a % b
-            }
-            Self::Neg => -spop!(),
-            Self::Less => {
-                let [b, a] = [spop!(), spop!()];
-                Number::Integer((a < b) as i64)
-            }
-            Self::Leq => {
-                let [b, a] = [spop!(), spop!()];
-                Number::Integer((a <= b) as i64)
-            }
-            Self::Great => {
-                let [b, a] = [spop!(), spop!()];
-                Number::Integer((a > b) as i64)
-            }
-            Self::Geq => {
-                let [b, a] = [spop!(), spop!()];
-                Number::Integer((a >= b) as i64)
-            }
-            Self::Eq => Number::Integer((spop!() == spop!()) as i64),
-            Self::Neq => Number::Integer((spop!() != spop!()) as i64),
-            Self::Cmp => {
-                let [b, a] = [spop!(), spop!()];
-                Number::Float(
-                    // Ordering::Less => -1, Ordering::Equal => 0, Ordering::Greater => 1
-                    // Thanks, rust stdlib
-                    (a.partial_cmp(&b)).map_or(f64::NAN, |c| c as i8 as f64),
-                )
-            }
-            Self::Tern => {
-                let falsy = spop!(lazy);
-                let truthy = spop!(lazy);
-                let cond = spop!();
-                if cond == Number::ZERO {
-                    falsy.eval(var, args, depth + 1, name, steps)?
-                } else {
-                    truthy.eval(var, args, depth + 1, name, steps)?
+            match step {
+                Step::Input(i) => stack.push(inputs.get((i - 1) as usize).copied().ok_or_else(|| {
+                    format!("in {}: tried to get nonexistent argument {i}", self.name)
+                })?),
+                Step::Number(number) => stack.push(number),
+                Step::FuncCall(interner_entry) => {
+                    let func = var_reg.load_fn(interner_entry).ok_or_else(|| {
+                        format!("in {}: function {interner_entry} does not exist", self.name)
+                    })?;
+                    let args = stack
+                        .drain((stack.len() - func.arg_count as usize)..)
+                        .collect::<Vec<_>>();
+                    stack.push(stacker::maybe_grow(RED_ZONE, STACK_SIZE, || {
+                        func._execute(args, var_reg, depth + 1, steps)
+                    })?);
                 }
-            }
-            Self::And => Number::Integer(i64::from(spop!()) & i64::from(spop!())),
-            Self::Or => Number::Integer(i64::from(spop!()) | i64::from(spop!())),
-            Self::LogicAnd => {
-                let left = spop!();
-                let right = spop!(lazy);
-                if left == Number::ZERO {
-                    Number::Integer(0)
-                } else {
-                    Number::Integer(
-                        if right.eval(var, args, depth + 1, name, steps)? == Number::ZERO {
-                            0
-                        } else {
-                            1
-                        },
-                    )
-                }
-            }
-            Self::LogicOr => {
-                let left = spop!();
-                let right = spop!(lazy);
-                if left == Number::ZERO {
-                    Number::Integer(
-                        if right.eval(var, args, depth + 1, name, steps)? == Number::ZERO {
-                            0
-                        } else {
-                            1
-                        },
-                    )
-                } else {
-                    Number::Integer(1)
-                }
-            }
-            Self::Xor => Number::Integer(i64::from(spop!()) ^ i64::from(spop!())),
-            Self::Not => Number::Integer(!i64::from(spop!())),
-            Self::Shl => {
-                let [b, a] = [spop!(), spop!()];
-                Number::Integer(i64::from(a) << ((i64::from(b) as u64) % 64))
-            }
-            Self::Shr => {
-                let [b, a] = [spop!(), spop!()];
-                Number::Integer(((i64::from(a) as u64) >> (i64::from(b) as u64 % 64)) as i64)
-            }
-            Self::AShr => {
-                let [b, a] = [spop!(), spop!()];
-                Number::Integer(i64::from(a) >> ((i64::from(b) as u64) % 64))
-            }
-            Self::Pow => {
-                let [b, a] = [spop!(), spop!()];
-                a.pow(b)
-            }
-            Self::Log => {
-                let [b, a] = [spop!(), spop!()];
-                a.log(b)
-            }
-            Self::Abs => match spop!() {
-                Number::Complex(c) => Number::Float(c.norm()),
-                other => {
-                    if other < Number::ZERO {
-                        -other
-                    } else {
-                        other
+                Step::Branch(amount) => {
+                    let val = pop!()?;
+                    if val != Number::ZERO {
+                        bytecode.truncate_to_range(amount..);
                     }
                 }
-            },
-            Self::Sin => match spop!() {
-                Number::Integer(i) => Number::Float((i as f64).sin()),
-                Number::Float(f) => Number::Float(f.sin()),
-                Number::Complex(c) => Number::Complex(c.sin()),
-            },
-            Self::Cos => match spop!() {
-                Number::Integer(i) => Number::Float((i as f64).cos()),
-                Number::Float(f) => Number::Float(f.cos()),
-                Number::Complex(c) => Number::Complex(c.cos()),
-            },
-            Self::Tan => match spop!() {
-                Number::Integer(i) => Number::Float((i as f64).tan()),
-                Number::Float(f) => Number::Float(f.tan()),
-                Number::Complex(c) => Number::Complex(c.tan()),
-            },
-            Self::Asin => match spop!() {
-                Number::Integer(i) => Number::Float((i as f64).asin()),
-                Number::Float(f) => Number::Float(f.asin()),
-                Number::Complex(c) => Number::Complex(c.asin()),
-            },
-            Self::Acos => match spop!() {
-                Number::Integer(i) => Number::Float((i as f64).acos()),
-                Number::Float(f) => Number::Float(f.acos()),
-                Number::Complex(c) => Number::Complex(c.acos()),
-            },
-            Self::Atan => match spop!() {
-                Number::Integer(i) => Number::Float((i as f64).atan()),
-                Number::Float(f) => Number::Float(f.atan()),
-                Number::Complex(c) => Number::Complex(c.atan()),
-            },
-            Self::Real => match spop!() {
-                Number::Complex(c) => Number::Float(c.re),
-                other => other,
-            },
-            Self::Imag => match spop!() {
-                Number::Complex(c) => Number::Float(c.im),
-                _other => Number::ZERO,
-            },
-            Self::Arg => Number::Float(Complex64::from(spop!()).arg()),
-        })
+                Step::Jump(amount) => bytecode.truncate_to_range(amount..),
+                Step::Operator(Operator::Copy) => {
+                    let x = pop!()?;
+                    stack.push(x);
+                    stack.push(x);
+                }
+                Step::Operator(Operator::Swap) => {
+                    let x = pop!()?;
+                    let y = pop!()?;
+                    stack.push(x);
+                    stack.push(y);
+                }
+                Step::Operator(Operator::Rotate) => {
+                    let x = pop!()?;
+                    let y = pop!()?;
+                    let z = pop!()?;
+                    stack.push(x);
+                    stack.push(z);
+                    stack.push(y);
+                }
+                Step::Operator(opr) => {
+                    let val = match opr {
+                        Operator::Add => pop!()? + pop!()?,
+                        Operator::Sub => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            a - b
+                        }
+                        Operator::Mul => pop!()? * pop!()?,
+                        Operator::Div => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            a / b
+                        }
+                        Operator::Mod => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            a % b
+                        }
+                        Operator::Neg => -pop!()?,
+                        Operator::Less => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            Number::Integer((a < b) as i64)
+                        }
+                        Operator::Leq => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            Number::Integer((a <= b) as i64)
+                        }
+                        Operator::Great => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            Number::Integer((a > b) as i64)
+                        }
+                        Operator::Geq => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            Number::Integer((a >= b) as i64)
+                        }
+                        Operator::Eq => Number::Integer((pop!()? == pop!()?) as i64),
+                        Operator::Neq => Number::Integer((pop!()? != pop!()?) as i64),
+                        Operator::Cmp => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            Number::Float(
+                                // Ordering::Less => -1, Ordering::Equal => 0, Ordering::Greater => 1
+                                // Thanks, rust stdlib
+                                (a.partial_cmp(&b)).map_or(f64::NAN, |c| c as i8 as f64),
+                            )
+                        }
+                        Operator::And => Number::Integer(i64::from(pop!()?) & i64::from(pop!()?)),
+                        Operator::Or => Number::Integer(i64::from(pop!()?) | i64::from(pop!()?)),
+                        Operator::Xor => Number::Integer(i64::from(pop!()?) ^ i64::from(pop!()?)),
+                        Operator::Not => Number::Integer(!i64::from(pop!()?)),
+                        Operator::Shl => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            Number::Integer(i64::from(a) << ((i64::from(b) as u64) % 64))
+                        }
+                        Operator::Shr => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            Number::Integer(
+                                ((i64::from(a) as u64) >> (i64::from(b) as u64 % 64)) as i64,
+                            )
+                        }
+                        Operator::AShr => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            Number::Integer(i64::from(a) >> ((i64::from(b) as u64) % 64))
+                        }
+                        Operator::Pow => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            a.pow(b)
+                        }
+                        Operator::Log => {
+                            let [b, a] = [pop!()?, pop!()?];
+                            a.log(b)
+                        }
+                        Operator::Abs => match pop!()? {
+                            Number::Complex(c) => Number::Float(c.norm()),
+                            other => {
+                                if other < Number::ZERO {
+                                    -other
+                                } else {
+                                    other
+                                }
+                            }
+                        },
+                        Operator::Sin => match pop!()? {
+                            Number::Integer(i) => Number::Float((i as f64).sin()),
+                            Number::Float(f) => Number::Float(f.sin()),
+                            Number::Complex(c) => Number::Complex(c.sin()),
+                        },
+                        Operator::Cos => match pop!()? {
+                            Number::Integer(i) => Number::Float((i as f64).cos()),
+                            Number::Float(f) => Number::Float(f.cos()),
+                            Number::Complex(c) => Number::Complex(c.cos()),
+                        },
+                        Operator::Tan => match pop!()? {
+                            Number::Integer(i) => Number::Float((i as f64).tan()),
+                            Number::Float(f) => Number::Float(f.tan()),
+                            Number::Complex(c) => Number::Complex(c.tan()),
+                        },
+                        Operator::Asin => match pop!()? {
+                            Number::Integer(i) => Number::Float((i as f64).asin()),
+                            Number::Float(f) => Number::Float(f.asin()),
+                            Number::Complex(c) => Number::Complex(c.asin()),
+                        },
+                        Operator::Acos => match pop!()? {
+                            Number::Integer(i) => Number::Float((i as f64).acos()),
+                            Number::Float(f) => Number::Float(f.acos()),
+                            Number::Complex(c) => Number::Complex(c.acos()),
+                        },
+                        Operator::Atan => match pop!()? {
+                            Number::Integer(i) => Number::Float((i as f64).atan()),
+                            Number::Float(f) => Number::Float(f.atan()),
+                            Number::Complex(c) => Number::Complex(c.atan()),
+                        },
+                        Operator::Real => match pop!()? {
+                            Number::Complex(c) => Number::Float(c.re),
+                            other => other,
+                        },
+                        Operator::Imag => match pop!()? {
+                            Number::Complex(c) => Number::Float(c.im),
+                            _other => Number::ZERO,
+                        },
+                        Operator::Arg => Number::Float(Complex64::from(pop!()?).arg()),
+                        Operator::StackLength => Number::Integer(stack.len() as i64),
+                        Operator::Copy | Operator::Swap | Operator::Rotate => {
+                            unreachable!("stack operands should have already been handled")
+                        }
+                        Operator::Tern | Operator::LogicAnd | Operator::LogicOr => {
+                            unreachable!("lazy operands should have already been handled")
+                        }
+                    };
+                    stack.push(val);
+                }
+            }
+        }
+    }
+}
+
+impl ExprAST {
+    pub fn compile(self) -> CompiledExpr {
+        CompiledExpr {
+            arg_count: self.arg_count,
+            bytecode: self.nodes.to_bytecode(),
+            name: self.name,
+        }
     }
 }
 
 #[test]
 fn nodetest() -> Result<(), Box<dyn std::error::Error>> {
-    let mut reg = VariableRegistry::new();
+    let reg = VariableRegistry::new();
     let entry = InternerEntry::get_or_intern(b"<test>");
 
-    let func = ExpressionFunction::parse(b"1 2 + 3 *", &reg, entry)?;
+    let func = ExprAST::parse(b"1 2 + 3 *", &reg, entry)?.compile();
     assert_eq!(
         Number::Integer(9),
-        func.exec(&[], &VariableRegistry::new(), entry)?
+        func.execute(vec![], &VariableRegistry::new())?
     );
-    let func = ExpressionFunction::parse(b"1 16 0.5 ** /", &reg, entry)?;
+    let func = ExprAST::parse(b"1 16 0.5 ** /", &reg, entry)?.compile();
     assert_eq!(
         Number::Float(0.25),
-        func.exec(&[], &VariableRegistry::new(), entry)?
+        func.execute(vec![], &VariableRegistry::new())?
     );
 
     Ok(())
@@ -624,8 +617,7 @@ fn rectest() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(v) = func() {
             break v;
         }
-    }
-    .map_err(|v| panic!("{v}"))?;
+    }.map_err(|v| panic!("{v}"))?;
     println!("{}", String::from_utf8_lossy(&out));
     Ok(())
 }

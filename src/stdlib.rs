@@ -1,6 +1,6 @@
 //! Defines some basic macros for regular use.
 
-use crate::{Macro, MacroError, Number, expr::ExpressionFunction, var_reg::VariableRegistry, intern::InternerEntry};
+use crate::{Macro, MacroError, Number, expr::{ExprAST, CompiledExpr}, var_reg::VariableRegistry, intern::InternerEntry};
 use aho_corasick::AhoCorasick;
 use base64::Engine;
 use const_format::concatcp;
@@ -10,7 +10,6 @@ use rand::seq::SliceRandom as _;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro128PlusPlus;
 use regex::Regex;
-use std::i64;
 use std::io::prelude::*;
 use std::{
     borrow::Cow,
@@ -169,6 +168,37 @@ fn is_truthy(value: &[u8]) -> bool {
         value,
         b"false" | b"0" | b"False" | b"0.0" | b"0.0+0.0j" | b"0+0j" | b"0j" | b""
     )
+}
+
+
+
+macro_rules! view_get_impl {
+    ($index: ident, $var: ident, $v: ident, $ty: ty) => { {
+        let index = i64::from(Number::try_from($index)?) as usize;
+        let entry = InternerEntry::get_or_intern($var);
+        let val = $v.load(entry).ok_or_else(|| format!("variable {} does not exist", String::from_utf8_lossy($var)))?;
+        val.get(index ..= index + std::mem::size_of::<$ty>() - 1)
+            .ok_or_else(|| format!("invalid view index").into())
+            .map(|v| {
+                let int: &[u8; const { std::mem::size_of::<$ty>() }] = v.try_into().expect("slice should be a consistent size");
+                Cow::Owned(format!("{}", <$ty>::from_le_bytes(*int)).into_bytes())
+            })
+     } };
+}
+
+macro_rules! view_set_impl {
+    ($index: ident, $value: ident, $var: ident, $v: ident, $ty: ty) => { {
+        let index = i64::from(Number::try_from($index)?) as usize;
+        let value = str::from_utf8($value)?;
+        let value: $ty = str::parse(value).map_err(|e| format!("failed to parse {}: {e}", ::core::stringify!($ty)))?;
+        let entry = InternerEntry::get_or_intern($var);
+        let val = $v.load_mut(entry).ok_or_else(|| format!("variable {} does not exist", String::from_utf8_lossy($var)))?;
+        let mem = val.get_mut(index ..= index + std::mem::size_of::<$ty>() - 1)
+            .ok_or_else(|| format!("invalid view index"))?;
+        let int: &mut [u8; const { std::mem::size_of::<$ty>() }] = mem.try_into().expect("slice should be a consistent size");
+        *int = value.to_le_bytes();
+        Ok(Cow::Borrowed(b""))
+    } };
 }
 
 def_macro! {
@@ -891,7 +921,7 @@ def_macro! {
     /// 2? The slice start.
     /// 3? The slice end.
     /// 4? The slice step.
-    pub macro BSlice [b"byte.slice"] (haystack, ...args) + _x, _v, _r {
+    pub macro BSlice [b"bslice"] (haystack, ...args) + _x, _v, _r {
         let start = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
         let end = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
         let step = args.next().and_then(|v| (!v.is_empty()).then_some(v)).map(|v| Number::try_from(v).map(i64::from)).transpose()?;
@@ -1144,53 +1174,65 @@ def_macro! {
         let index = Number::try_from(index).map(i64::from)?;
         let index = usize::try_from(index).map_err(|_| "invalid index")?;
         let byte = buf.get_mut(index).ok_or("index out of bounds")?;
-        let value = Number::try_from(value).map(i64::from)?;
-        let value = u8::try_from(value).map_err(|_| "invalid byte")?;
+        let value = str::from_utf8(value).map_err(|_| "invalid byte")?;
+        let value = u8::from_str_radix(value, 16).map_err(|_| "invalid byte")?;
         *byte = value;
         Ok(Cow::Borrowed(b""))
     }
 
-    /// Gets a single byte of a variable as a hexadecimal value.
+    /// Gets a byte, or range of bytes, from a variable as a hexadecimal string.
     /// # Arguments
     /// 1. The variable to index into.
-    /// 2. The byte index in the variable. Must be greater than or equal to 0.
-    pub macro ByteGet [b"byte.get"] (name, index) + _x, v, _r {
+    /// 2. The byte index in the variable to start. Must be greater than or equal to 0.
+    /// 3? The byte index in the variable to end. Must be greater than or equal to 0. Defaults to the start + 1.
+    pub macro ByteGet [b"byte.get"] (name, start, ...args) + _x, v, _r {
         let entry = InternerEntry::get_or_intern(name);
         let buf = v.load(entry)
             .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
-        let index = Number::try_from(index).map(i64::from)?;
-        let index = usize::try_from(index).map_err(|_| "invalid index")?;
-        let byte = buf.get(index).ok_or("index out of bounds")?;
-        Ok(Cow::Owned(format!("{byte:02x}").into_bytes()))
+        let start = Number::try_from(start).map(i64::from)? as usize;
+        let start = usize::try_from(start).map_err(|_| "invalid index")?;
+        let end = args.next().and_then(|v| (!v.is_empty()).then_some(v))
+            .map(|v| Number::try_from(v).map(|v| i64::from(v) as usize))
+            .transpose()?
+            .or(start.checked_add(1));
+        if end.is_none_or(|e| e < start) { return Err("end must not be less than start")?; }
+        let Some(end) = end else { unreachable!() };
+        let bytes = buf.get(start..end).ok_or("index out of bounds")?;
+        let mut s = Vec::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            s.extend(&HEX[*byte as usize]);
+        }
+        Ok(Cow::Owned(s))
     }
 
-    /// Splices a string of hexadecimal bytes into a variable.
+    /// Splices a variable into a variable, given a byte range to replace.
     /// # Arguments
-    /// 1. The variable to splice.
-    /// 2. The hexadecimal string splice into the byte.
+    /// 1. The variable to splice into.
+    /// 2. The variable to splice from. Must not be the same as argument 1.
     /// 3. The byte index to start in the variable. Must be greater than or equal to 0.
-    /// 4? The byte index to end in the variable. Must be greater than or equal to 0. Defaults to the end of the string.
-    pub macro ByteSplice [b"byte.splice"] (name, value, start, ...iter) + _x, v, _r {
-        let entry = InternerEntry::get_or_intern(name);
-        let buf = v.load_mut(entry)
-            .ok_or_else(move || -> MacroError { format!("variable {} does not exist", String::from_utf8_lossy(&*name)).into() })?;
-
-        if value.len() % 2 != 0 { return Err("hexstring length must be even")? }
+    /// 4. The byte index to end in the variable. Must be greater than or equal to the start index, and less than the length of the destination string.
+    pub macro ByteSplice [b"byte.splice"] (destination, source, start, end) + _x, v, _r {
+        let src_entry = InternerEntry::get_or_intern(source);
+        let dst_entry = InternerEntry::get_or_intern(destination);
+        if src_entry == dst_entry { return Err("cannot splice a variable onto itself")?; }
+        let [src, dst] = v.load_two_mut(src_entry, dst_entry)
+            .ok_or_else(move || -> MacroError { format!("variable {} or {} does not exist", String::from_utf8_lossy(&*source), String::from_utf8_lossy(&*destination)).into() })?;
 
         let start = usize::try_from(Number::try_from(start).map(i64::from)?).map_err(|_| "invalid index")?;
-        let end = match iter.next() {
-            Some(end) => usize::try_from(Number::try_from(end).map(i64::from)?).map_err(|_| "invalid index")?,
-            None => buf.len()
-        };
-
-        let prefix = buf.get(..start).ok_or("start index out of bounds")?;
-        let suffix = buf.get(end..).ok_or("end index out of bounds")?;
-        let mut buf = Vec::from(prefix);
-        buf.try_reserve(value.len() / 2 + suffix.len())?;
-        for hex in value.chunks(2) {
-            let byte_str = str::from_utf8(hex)?;
-            buf.push(u8::from_str_radix(byte_str, 16).map_err(|_| format!("invalid byte: {byte_str}"))?);
+        let end = usize::try_from(Number::try_from(end).map(i64::from)?).map_err(|_| "invalid index")?;
+        if end < start { return Err("end must be greater than or equal to start for splice")?; }
+        if end > dst.len() { return Err("end is out of bounds for splice")?; }
+        if end - start == src.len() {
+            // Simple copy, no need to allocate
+            dst[start..end].copy_from_slice(src);
+            return Ok(Cow::Borrowed(b""));
         }
+        
+        let prefix = dst.get(..start).ok_or("start index out of bounds")?;
+        let suffix = dst.get(end..).ok_or("end index out of bounds")?;
+        
+        let mut buf = Vec::from(prefix);
+        buf.extend(dst.iter());
         buf.extend(suffix);
         Ok(Cow::Borrowed(b""))
     }
@@ -1292,7 +1334,7 @@ def_macro! {
     ///
     /// All easings except for `linear` must be followed by `_in`, `_out`, or `_in_out`.
     ///
-    /// For more information, see https://easings.net/.
+    /// For more information, see <https://easings.net/>.
     ///
     /// # Arguments
     /// 1. The number at the start of the easing animation.
@@ -1364,7 +1406,7 @@ def_macro! {
     pub macro ExprDef [b"expr.def"] (name, ...value) + _x, v, _r {
         let entry = InternerEntry::get_or_intern(name);
         let expr_str = value.intersperse(b"/").flatten().copied().collect::<Vec<u8>>();
-        let expr = ExpressionFunction::parse(&expr_str, &v, entry)?;
+        let expr = ExprAST::parse(&expr_str, &v, entry)?.compile();
         v.store_fn(entry, expr);
         Ok(Cow::Borrowed(b""))
     }
@@ -1403,6 +1445,10 @@ def_macro! {
     /// - `real`: Real component of complex number
     /// - `imag`: Imaginary component of complex number
     /// - `arg`: Argument of complex number
+    /// - `->`: Copies top of stack
+    /// - `<>`: Swaps top two stack values
+    /// - `<>>`: Rotates top three stack values (321 -> 132)
+    /// - `@`: Pushes stack length
     macro ExprDefOps [b"expr.def_ops"] () + _x, _v, _r {
         Ok(Cow::Borrowed(b""))
     }
@@ -1416,7 +1462,7 @@ def_macro! {
     pub macro ExprForward [b"expr.fwd"] (name, count) + _x, v, _r {
         let entry = InternerEntry::get_or_intern(name);
         let count: u32 = i64::from(Number::try_from(count)?).try_into().map_err(|v| format!("{v}"))?;
-        let expr = ExpressionFunction::forward(count);
+        let expr = CompiledExpr::forward(count, entry);
         v.store_fn(entry, expr);
         Ok(Cow::Borrowed(b""))
     }
@@ -1429,7 +1475,7 @@ def_macro! {
         let entry = InternerEntry::get_or_intern(name);
         let expr = v.load_fn(entry).ok_or("expression is undefined")?;
         let args = args.map(|v| Number::try_from(&*v)).collect::<Result<Vec<_>, _>>()?;
-        let res = expr.exec(&args, &*v, entry)?;
+        let res = expr.execute(args, &*v)?;
         Ok(Cow::Owned(format!("{res}").into_bytes()))
     }
 
@@ -1439,8 +1485,8 @@ def_macro! {
     pub macro Expr [b"expr"] (...value) + _x, v, _r {
         let entry = InternerEntry::get_or_intern(b"<inline>");
         let expr_str = value.intersperse(b"/").flatten().copied().collect::<Vec<u8>>();
-        let expr = ExpressionFunction::parse(&expr_str, &VariableRegistry::new(), entry)?;
-        let res = expr.exec(&[], &*v, entry)?;
+        let expr = ExprAST::parse(&expr_str, v, entry)?.compile();
+        let res = expr.execute(vec![], v)?;
         Ok(Cow::Owned(format!("{res}").into_bytes()))
     }
     
@@ -1459,6 +1505,107 @@ def_macro! {
         } else {
             format!("{number:0$.1$}", before, after)
         }.into_bytes()))
+    }
+    
+    // Unfortunately, nesting macros doesn't work. We have to do this by hand.
+    
+    /// Gets the value of a single u8 from the bytes of a variable, at the given index.
+    pub macro ViewU8Get [b"view.u8.get"] (var, index) + _x, v, _r {
+        view_get_impl!(index, var, v, u8)
+    }
+    
+    /// Sets the value of a single u8 in the bytes of a variable, at the given index.
+    pub macro ViewU8Set [b"view.u8.set"] (var, index, value) + _x, v, _r {
+        view_set_impl!(index, value, var, v, u8)
+    }
+    
+    /// Gets the value of a single i8 from the bytes of a variable, at the given index.
+    pub macro ViewI8Get [b"view.i8.get"] (var, index) + _x, v, _r {
+        view_get_impl!(index, var, v, i8)
+    }
+    
+    /// Sets the value of a single i8 in the bytes of a variable, at the given index.
+    pub macro ViewI8Set [b"view.i8.set"] (var, index, value) + _x, v, _r {
+        view_set_impl!(index, value, var, v, i8)
+    }
+    
+    /// Gets the value of a single u16 from the bytes of a variable, at the given index.
+    pub macro ViewU16Get [b"view.u16.get"] (var, index) + _x, v, _r {
+        view_get_impl!(index, var, v, u16)
+    }
+    
+    /// Sets the value of a single u16 in the bytes of a variable, at the given index.
+    pub macro ViewU16Set [b"view.u16.set"] (var, index, value) + _x, v, _r {
+        view_set_impl!(index, value, var, v, u16)
+    }
+    
+    /// Gets the value of a single i16 from the bytes of a variable, at the given index.
+    pub macro ViewI16Get [b"view.i16.get"] (var, index) + _x, v, _r {
+        view_get_impl!(index, var, v, i16)
+    }
+    
+    /// Sets the value of a single i16 in the bytes of a variable, at the given index.
+    pub macro ViewI16Set [b"view.i16.set"] (var, index, value) + _x, v, _r {
+        view_set_impl!(index, value, var, v, i16)
+    }
+    /// Gets the value of a single u32 from the bytes of a variable, at the given index.
+    pub macro ViewU32Get [b"view.u32.get"] (var, index) + _x, v, _r {
+        view_get_impl!(index, var, v, u32)
+    }
+    
+    /// Sets the value of a single u32 in the bytes of a variable, at the given index.
+    pub macro ViewU32Set [b"view.u32.set"] (var, index, value) + _x, v, _r {
+        view_set_impl!(index, value, var, v, u32)
+    }
+    
+    /// Gets the value of a single i32 from the bytes of a variable, at the given index.
+    pub macro ViewI32Get [b"view.i32.get"] (var, index) + _x, v, _r {
+        view_get_impl!(index, var, v, i32)
+    }
+    
+    /// Sets the value of a single i32 in the bytes of a variable, at the given index.
+    pub macro ViewI32Set [b"view.i32.set"] (var, index, value) + _x, v, _r {
+        view_set_impl!(index, value, var, v, i32)
+    }
+    
+    /// Gets the value of a single u64 from the bytes of a variable, at the given index.
+    pub macro ViewU64Get [b"view.u64.get"] (var, index) + _x, v, _r {
+        view_get_impl!(index, var, v, u64)
+    }
+    
+    /// Sets the value of a single u64 in the bytes of a variable, at the given index.
+    pub macro ViewU64Set [b"view.u64.set"] (var, index, value) + _x, v, _r {
+        view_set_impl!(index, value, var, v, u64)
+    }
+    
+    /// Gets the value of a single i64 from the bytes of a variable, at the given index.
+    pub macro ViewI64Get [b"view.i64.get"] (var, index) + _x, v, _r {
+        view_get_impl!(index, var, v, i64)
+    }
+    
+    /// Sets the value of a single i64 in the bytes of a variable, at the given index.
+    pub macro ViewI64Set [b"view.i64.set"] (var, index, value) + _x, v, _r {
+        view_set_impl!(index, value, var, v, i64)
+    }
+    
+    /// Gets the value of a single f32 from the bytes of a variable, at the given index.
+    pub macro ViewF32Get [b"view.f32.get"] (var, index) + _x, v, _r {
+        view_get_impl!(index, var, v, f32)
+    }
+    
+    /// Sets the value of a single f32 in the bytes of a variable, at the given index.
+    pub macro ViewF32Set [b"view.f32.set"] (var, index, value) + _x, v, _r {
+        view_set_impl!(index, value, var, v, f32)
+    }
+    
+    /// Gets the value of a single f64 from the bytes of a variable, at the given index.
+    pub macro ViewF64Get [b"view.f64.get"] (var, index) + _x, v, _r {
+        view_get_impl!(index, var, v, f64)
+    }
+    
+    /// Sets the value of a single f64 in the bytes of a variable, at the given index.
+    pub macro ViewF64Set [b"view.f64.set"] (var, index, value) + _x, v, _r {
+        view_set_impl!(index, value, var, v, f64)
     }
 }
 
@@ -1480,4 +1627,23 @@ pub(crate) static BYTES: [u8; 256] = [
     0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF,
     0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF,
     0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF,
+];
+
+pub(crate) static HEX: [[u8; 2]; 256] = [
+    *b"00", *b"01", *b"02", *b"03", *b"04", *b"05", *b"06", *b"07", *b"08", *b"09", *b"0A", *b"0B", *b"0C", *b"0D", *b"0E", *b"0F",
+    *b"10", *b"11", *b"12", *b"13", *b"14", *b"15", *b"16", *b"17", *b"18", *b"19", *b"1A", *b"1B", *b"1C", *b"1D", *b"1E", *b"1F",
+    *b"20", *b"21", *b"22", *b"23", *b"24", *b"25", *b"26", *b"27", *b"28", *b"29", *b"2A", *b"2B", *b"2C", *b"2D", *b"2E", *b"2F",
+    *b"30", *b"31", *b"32", *b"33", *b"34", *b"35", *b"36", *b"37", *b"38", *b"39", *b"3A", *b"3B", *b"3C", *b"3D", *b"3E", *b"3F",
+    *b"40", *b"41", *b"42", *b"43", *b"44", *b"45", *b"46", *b"47", *b"48", *b"49", *b"4A", *b"4B", *b"4C", *b"4D", *b"4E", *b"4F",
+    *b"50", *b"51", *b"52", *b"53", *b"54", *b"55", *b"56", *b"57", *b"58", *b"59", *b"5A", *b"5B", *b"5C", *b"5D", *b"5E", *b"5F",
+    *b"60", *b"61", *b"62", *b"63", *b"64", *b"65", *b"66", *b"67", *b"68", *b"69", *b"6A", *b"6B", *b"6C", *b"6D", *b"6E", *b"6F",
+    *b"70", *b"71", *b"72", *b"73", *b"74", *b"75", *b"76", *b"77", *b"78", *b"79", *b"7A", *b"7B", *b"7C", *b"7D", *b"7E", *b"7F",
+    *b"80", *b"81", *b"82", *b"83", *b"84", *b"85", *b"86", *b"87", *b"88", *b"89", *b"8A", *b"8B", *b"8C", *b"8D", *b"8E", *b"8F",
+    *b"90", *b"91", *b"92", *b"93", *b"94", *b"95", *b"96", *b"97", *b"98", *b"99", *b"9A", *b"9B", *b"9C", *b"9D", *b"9E", *b"9F",
+    *b"A0", *b"A1", *b"A2", *b"A3", *b"A4", *b"A5", *b"A6", *b"A7", *b"A8", *b"A9", *b"AA", *b"AB", *b"AC", *b"AD", *b"AE", *b"AF",
+    *b"B0", *b"B1", *b"B2", *b"B3", *b"B4", *b"B5", *b"B6", *b"B7", *b"B8", *b"B9", *b"BA", *b"BB", *b"BC", *b"BD", *b"BE", *b"BF",
+    *b"C0", *b"C1", *b"C2", *b"C3", *b"C4", *b"C5", *b"C6", *b"C7", *b"C8", *b"C9", *b"CA", *b"CB", *b"CC", *b"CD", *b"CE", *b"CF",
+    *b"D0", *b"D1", *b"D2", *b"D3", *b"D4", *b"D5", *b"D6", *b"D7", *b"D8", *b"D9", *b"DA", *b"DB", *b"DC", *b"DD", *b"DE", *b"DF",
+    *b"E0", *b"E1", *b"E2", *b"E3", *b"E4", *b"E5", *b"E6", *b"E7", *b"E8", *b"E9", *b"EA", *b"EB", *b"EC", *b"ED", *b"EE", *b"EF",
+    *b"F0", *b"F1", *b"F2", *b"F3", *b"F4", *b"F5", *b"F6", *b"F7", *b"F8", *b"F9", *b"FA", *b"FB", *b"FC", *b"FD", *b"FE", *b"FF",
 ];

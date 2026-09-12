@@ -85,7 +85,7 @@ impl Macro for TextMacro {
                             .copied()
                             .filter_map(|v| v)
                             .collect::<Vec<_>>();
-                        let mut idx = isize::from_ascii(&source_slice).ok()?;
+                        let mut idx = isize::from_ascii_bytes(&source_slice).ok()?;
                         if from_back {
                             if idx == 0 {
                                 return Some((3, args.join(b"/" as &[u8]).into()));
