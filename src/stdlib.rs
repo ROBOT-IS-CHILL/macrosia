@@ -1392,7 +1392,7 @@ def_macro! {
     ///
     /// Each operator or number (generally called a _node_) must be
     /// separated by at least one whitespace character.
-    /// Also supported is the node `$N`, for input values, and
+    /// Also supported is the node `%N`, for input values, and
     /// `#<ident>`, which allows calling other expressions inside of an expression.
     ///
     /// Calling an expression will pop its required arguments from the stack.

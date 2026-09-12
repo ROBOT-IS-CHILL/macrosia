@@ -136,7 +136,7 @@ impl Operator {
 
 impl Node {
     fn try_parse(mut string: &[u8]) -> Option<Self> {
-        if let Some(s) = string.strip_prefix(b"$") {
+        if let Some(s) = string.strip_prefix(b"%") {
             string = s;
             if !string.iter().all(|c| c.is_ascii_digit()) {
                 return None;
