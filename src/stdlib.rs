@@ -1429,7 +1429,7 @@ def_macro! {
     /// - `-`: Subtract
     /// - `*`: Multiply
     /// - `/`: Divide
-    /// - `%`: Modulus
+    /// - `mod`: Modulus
     /// - `~`: Negate
     /// - `?`: Ternary (if first argument is nonzero, choose first argument, otherwise choose second argument)
     /// - `&`: Bitwise AND
