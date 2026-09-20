@@ -107,7 +107,7 @@ impl Operator {
             b"-" => Sub,
             b"*" => Mul,
             b"/" => Div,
-            b"%" => Mod,
+            b"mod" => Mod,
             b"~" => Neg,
             b"?" => Tern,
             b"&&" => LogicAnd,
