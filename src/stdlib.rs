@@ -1232,7 +1232,7 @@ def_macro! {
         let suffix = dst.get(end..).ok_or("end index out of bounds")?;
         
         let mut buf = Vec::from(prefix);
-        buf.extend(dst.iter());
+        buf.extend(src.iter());
         buf.extend(suffix);
         
         v.store(dst_entry, buf.into());
