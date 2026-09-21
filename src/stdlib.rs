@@ -1234,6 +1234,8 @@ def_macro! {
         let mut buf = Vec::from(prefix);
         buf.extend(dst.iter());
         buf.extend(suffix);
+        
+        v.store(dst_entry, buf.into());
         Ok(Cow::Borrowed(b""))
     }
 
